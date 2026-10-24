@@ -3,7 +3,7 @@ import cors from 'cors';
 import * as dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import { db } from './backend/src/services/firebase.ts';
-import { bot, handleTelegramUpdate, dispatchSendMessage } from './backend/src/services/bot.ts';
+import { getBot, handleTelegramUpdate, dispatchSendMessage } from './backend/src/services/bot.ts';
 import { doc, deleteDoc } from 'firebase/firestore';
 
 dotenv.config();
@@ -81,10 +81,15 @@ async function startServer() {
           studentCode,
           fullNameAm: regData.fullNameAm || 'ተማሪ',
           fullNameEn: regData.fullNameEn || 'Student',
+          christianName: regData.christianName || '',
+          birthYear: regData.birthYear || regData.birthDate || '',
           phone: regData.phone || '',
           gender: regData.gender || 'male',
           department: regData.department || 'education',
           gradeLevel: regData.gradeLevel || 'general',
+          photoUrl: regData.photoUrl || '',
+          emergencyContact: regData.emergencyContact || { name: '', phone: '', relation: '' },
+          subcity: regData.subcity || regData.address || '',
           telegramId: regData.telegramId || '',
           status: 'active',
           registeredDate: new Date().toISOString().split('T')[0],
@@ -136,20 +141,29 @@ async function startServer() {
 
       // Collect all student & registration telegram IDs
       let sentCount = 0;
+      const bot = getBot();
       if (bot) {
-        const studentSnap = await db.collection('students').get();
-        const regSnap = await db.collection('registrations').get();
-        const tgIds = new Set<number | string>();
+        const { targetIds } = req.body;
+        let tgIds = new Set<number | string>();
 
-        studentSnap.docs.forEach((d) => {
-          const tId = d.data().telegramId;
-          if (tId) tgIds.add(tId);
-        });
+        if (targetIds && Array.isArray(targetIds) && targetIds.length > 0) {
+          targetIds.forEach(id => tgIds.add(id));
+        } else {
+          const studentSnap = await db.collection('students').get();
+          const regSnap = await db.collection('registrations').get();
 
-        regSnap.docs.forEach((d) => {
-          const tId = d.data().telegramId;
-          if (tId) tgIds.add(tId);
-        });
+          console.log(`📣 Broadcasting: Found ${studentSnap.size} students and ${regSnap.size} registrations.`);
+          studentSnap.docs.forEach((d) => {
+            const tId = d.data().telegramId;
+            if (tId) tgIds.add(tId);
+          });
+
+          regSnap.docs.forEach((d) => {
+            const tId = d.data().telegramId;
+            if (tId) tgIds.add(tId);
+          });
+        }
+        console.log(`📣 Unique Telegram IDs collected: ${tgIds.size}`);
 
         const broadcastMsg = 
           `📢 *አዲስ ማስታወቂያ (Announcement)*\n` +
@@ -197,6 +211,7 @@ async function startServer() {
         updatedAt: new Date().toISOString()
       });
 
+      const bot = getBot();
       if (bot && leaveData.telegramId) {
         try {
           const statusAm = status === 'approved' ? '✅ ጸድቋል (Approved)' : '❌ አልተቀበለም (Rejected)';
@@ -242,6 +257,7 @@ async function startServer() {
         updatedAt: new Date().toISOString()
       });
 
+      const bot = getBot();
       if (bot && ticketData.telegramId) {
         try {
           const statusAm = status === 'resolved' ? '✅ ተፈትቷል (Resolved)' : status === 'in_contact' ? '📞 በሂደት ላይ (In Progress)' : '📌 ታይቷል (Updated)';
@@ -295,6 +311,7 @@ async function startServer() {
         updatedAt: new Date().toISOString()
       });
 
+      const bot = getBot();
       if (bot && ticketData.telegramId) {
         try {
           await bot.sendMessage(
@@ -335,6 +352,30 @@ async function startServer() {
       res.json({ success: true, message: 'Support ticket deleted.' });
     } catch (error) {
       res.status(500).json({ error: 'Failed to delete support ticket' });
+    }
+  });
+
+  // Telegram File Proxy Route (to show student profile photos from Telegram)
+  app.get('/api/telegram/file/:fileId', async (req, res) => {
+    try {
+      const { fileId } = req.params;
+      const bot = getBot();
+      if (!bot) return res.status(503).json({ error: 'Bot not initialized' });
+
+      const file = await bot.getFile(fileId);
+      const filePath = file.file_path;
+      const tgToken = process.env.TELEGRAM_BOT_TOKEN;
+      const url = `https://api.telegram.org/file/bot${tgToken}/${filePath}`;
+
+      const response = await fetch(url);
+      const buffer = await response.arrayBuffer();
+      
+      const contentType = response.headers.get('content-type') || 'image/jpeg';
+      res.set('Content-Type', contentType);
+      res.send(Buffer.from(buffer));
+    } catch (err) {
+      console.error('Error proxying Telegram file:', err);
+      res.status(500).json({ error: 'Failed to fetch file' });
     }
   });
 

@@ -169,8 +169,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onOpenStudentPort
           </button>
         </form>
 
-        <div className="mt-6 pt-4 border-t border-[#0f4425] text-center">
-          <p className="text-[11px] text-emerald-300/80">
+        <div className="mt-6 pt-4 border-t border-[#0f4425] text-center space-y-4">
+          {onOpenStudentPortal && (
+            <button
+              onClick={onOpenStudentPortal}
+              className="inline-flex items-center gap-2 text-xs font-bold text-emerald-400 hover:text-amber-400 transition-colors cursor-pointer"
+            >
+              <span>ተማሪ ነኝ? ወደ ፖርታሉ ተመለስ</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+          <p className="text-[10px] text-emerald-300/60 uppercase tracking-widest font-bold">
             የተማሪዎች መታወቂያ፣ ክትትልና የአባላት አስተዳደር ሥርዓት
           </p>
         </div>

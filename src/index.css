@@ -1,8 +1,16 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: 'JegenaTitle';
+  src: url('/fonts/JegenaTitle.ttf') format('truetype');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
 @layer base {
   body {
-    font-family: 'Plus Jakarta Sans', 'Noto Sans Ethiopic', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: 'JegenaTitle', 'Noto Sans Ethiopic', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
 }
 

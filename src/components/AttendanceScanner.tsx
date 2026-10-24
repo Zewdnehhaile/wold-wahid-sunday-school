@@ -181,7 +181,7 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
     setCodeQuery('');
   };
 
-  const handleScanWithCamera = () => {
+  const handleScanWithCamera = async () => {
     const tg = (window as any)?.Telegram?.WebApp;
     if (tg && typeof tg.showScanQrPopup === 'function') {
       tg.showScanQrPopup(
@@ -202,14 +202,47 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
       const el = document.getElementById(scannerId);
       if (el) {
         el.style.display = 'block';
-        if (!scannerRef.current) {
-          const scanner = new Html5QrcodeScanner(scannerId, { fps: 10, qrbox: 250 }, false);
-          scannerRef.current = scanner;
-          scanner.render((decodedText: string) => {
-            handleProcessCode(decodedText, 'qr');
-          }, (error) => {});
-        } else {
-          scannerRef.current.resume();
+        
+        // Use the core Html5Qrcode class for explicit control over constraints
+        const { Html5Qrcode } = await import('html5-qrcode');
+        
+        if (scannerRef.current) {
+          try {
+            await (scannerRef.current as any).stop();
+          } catch {}
+        }
+
+        const html5QrCode = new Html5Qrcode(scannerId);
+        (scannerRef.current as any) = html5QrCode;
+
+        const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+        
+        try {
+          // Explicitly request environment (back) camera
+          await html5QrCode.start(
+            { facingMode: "environment" },
+            config,
+            (decodedText) => {
+              handleProcessCode(decodedText, 'qr');
+              // Optionally stop after first scan in non-kiosk mode
+              if (!isKioskMode) {
+                html5QrCode.stop().catch(() => {});
+                el.style.display = 'none';
+              }
+            },
+            (errorMessage) => {
+              // Ignore silent errors
+            }
+          );
+        } catch (err: any) {
+          console.error("Camera start error:", err);
+          let userError = 'የካሜራ ስካነር ሊከፈት አልቻለም።';
+          if (err?.name === 'NotAllowedError') {
+            userError = 'ካሜራ ለመጠቀም ፈቃድ አልተሰጠም። እባክዎ ፈቃድ ይስጡ።';
+          } else if (err?.name === 'NotReadableError') {
+            userError = 'ካሜራው በሌላ መተግበሪያ እየተያዘ ሊሆን ይችላል። እባክዎ ስልክዎን ዳግም ያስጀምሩ።';
+          }
+          setScanErrorMessage(userError);
         }
       } else {
         setScanErrorMessage('የካሜራ ስካነር ሊከፈት አልቻለም።');
@@ -253,7 +286,45 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
 
       {/* Attendance List */}
       <div className="bg-[#09351c] border border-[#0f4425] rounded-2xl p-5 shadow-xl">
-        <h3 className="text-sm font-bold text-white mb-3">የተመዘገቡ ተማሪዎች ({attendance.length})</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold text-white">የተመዘገቡ ተማሪዎች ({attendance.length})</h3>
+          <button
+            onClick={async () => {
+              const absentees = members.filter(m => 
+                m.status === 'active' && 
+                !attendance.some(a => a.memberId === m.id && a.sessionName === activeSession.nameAm)
+              );
+              
+              if (absentees.length === 0) {
+                alert('ሁሉም ተማሪዎች ተገኝተዋል!');
+                return;
+              }
+
+              if (confirm(`${absentees.length} ተማሪዎች ዛሬ አልተገኙም። መንፈሳዊ የማሳሰቢያ መልእክት ለሁሉም መላክ ይፈልጋሉ?`)) {
+                try {
+                  const res = await fetch('/api/notifications/broadcast', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      title: 'የዛሬው መርሐ ግብር ናፍቆት',
+                      message: `ሰላም ለኪ/ለከ ይሁን! ✝️\n\nዛሬ በ"${activeSession.nameAm}" መርሐ ግብራችን ላይ ስላልተገኙ ትምህርቱም ሆነ በረከቱ ጎድሎብናልና አዝነናል።\n\nምናልባትም በምክንያት ከሆነ የፈቃድ መጠየቂያ በቦቱ በኩል እንዲልኩ እናሳስባለን።\n\nየእግዚአብሔር ጸጋና ሰላም ከእርስዎ ጋር ይሁን።`,
+                      senderName: currentAdmin?.nameAm || 'አስተዳዳሪ',
+                      targetIds: absentees.map(m => m.telegramId).filter(Boolean)
+                    }),
+                  });
+                  const data = await res.json();
+                  alert(`መልእክቱ ለ ${data.sentToTelegram || 0} ተማሪዎች ተልኳል።`);
+                } catch (err) {
+                  alert('መልእክቱን መላክ አልተቻለም።');
+                }
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-bold transition-colors"
+          >
+            <AlertCircle className="w-3.5 h-3.5" />
+            <span>አልተገኙም (Absentees)</span>
+          </button>
+        </div>
         <div className="space-y-2">
           {attendance.map((record) => (
             <div key={record.id} className="p-3 rounded-xl bg-[#062414] border border-[#0f4425] flex items-center justify-between gap-3 text-xs">

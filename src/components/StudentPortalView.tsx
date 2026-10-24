@@ -24,6 +24,7 @@ import {
   UserPlus,
   X,
   Upload,
+  FileText,
 } from 'lucide-react';
 
 interface StudentPortalViewProps {
@@ -39,7 +40,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   onOpenAdminLogin,
   lang,
 }) => {
-  const [activeTab, setActiveTab] = useState<'card' | 'schedule' | 'attendance' | 'register'>('card');
+  const [activeTab, setActiveTab] = useState<'card' | 'schedule' | 'attendance' | 'register' | 'leave'>('card');
   const [searchCode, setSearchCode] = useState('');
   const [selectedStudent, setSelectedStudent] = useState<Member | null>(() => members[0] || null);
   const [selectedGrade, setSelectedGrade] = useState<'pre_kg' | 'grade_1_2' | 'grade_3_5' | 'grade_6_9'>('grade_1_2');
@@ -57,6 +58,13 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   const [regPhotoUrl, setRegPhotoUrl] = useState('');
   const [isSubmittingReg, setIsSubmittingReg] = useState(false);
   const [regSuccessMsg, setRegSuccessMsg] = useState('');
+
+  // Leave Request State
+  const [leaveType, setLeaveType] = useState('Medical (የጤና)');
+  const [leaveDuration, setLeaveDuration] = useState('');
+  const [leaveReason, setLeaveReason] = useState('');
+  const [isSubmittingLeave, setIsSubmittingRegLeave] = useState(false);
+  const [leaveSuccessMsg, setLeaveSuccessMsg] = useState('');
 
   const handleSearchStudent = (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,16 +109,15 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
         emergencyContact: {
           name: regEmergencyName.trim(),
           phone: cleanEmergPhone || regEmergencyPhone.trim(),
+          relation: 'ቤተሰብ / Family'
         },
-        emergencyName: regEmergencyName.trim(),
-        emergencyPhone: cleanEmergPhone || regEmergencyPhone.trim(),
         department: regDepartment,
-        photoUrl: regPhotoUrl.trim() || WOLD_WAHID_LOGO,
+        photoUrl: regPhotoUrl.trim() || '',
         status: 'pending',
         submittedAt: new Date().toISOString(),
       });
 
-      setRegSuccessMsg('የምዝገባ ጥያቄዎ (ከ10ቱ መስኮች ጋር) ለአስተዳዳሪው ተልኳል! ሲጸድቅ መታወቂያ ይደርስዎታል።');
+      setRegSuccessMsg('🎉 የምዝገባ ጥያቄዎ በተሳካ ሁኔታ ተልኳል! በአስተዳዳሪው ሲጸድቅ መታወቂያ ይደርስዎታል።');
       setRegFullName('');
       setRegChristianName('');
       setRegBirthDate('');
@@ -119,11 +126,42 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
       setRegEmergencyName('');
       setRegEmergencyPhone('');
       setRegPhotoUrl('');
+      setTimeout(() => setRegSuccessMsg(''), 8000);
     } catch (err) {
       console.error('Registration submission error:', err);
       alert('ምዝገባውን መላክ አልተቻለም። እባክዎ እንደገና ይሞክሩ።');
     } finally {
       setIsSubmittingReg(false);
+    }
+  };
+
+  const handleLeaveSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedStudent || !leaveReason.trim()) return;
+
+    setIsSubmittingRegLeave(true);
+    try {
+      await addDoc(collection(db, 'leave_requests'), {
+        requestNumber: `LV-${Math.floor(1000 + Math.random() * 9000)}`,
+        studentName: selectedStudent.fullNameAm,
+        studentCode: selectedStudent.code,
+        memberId: selectedStudent.id,
+        leaveType,
+        duration: leaveDuration,
+        reason: leaveReason.trim(),
+        status: 'pending',
+        submittedAt: new Date().toISOString(),
+      });
+
+      setLeaveSuccessMsg('✅ የፈቃድ መጠየቂያዎ ተልኳል! አስተዳዳሪው ሲመለከተው መልእክት ይደርስዎታል።');
+      setLeaveReason('');
+      setLeaveDuration('');
+      setTimeout(() => setLeaveSuccessMsg(''), 8000);
+    } catch (err) {
+      console.error('Leave submission error:', err);
+      alert('የፈቃድ ጥያቄውን መላክ አልተቻለም።');
+    } finally {
+      setIsSubmittingRegLeave(false);
     }
   };
 
@@ -142,33 +180,33 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
   const gradeSchedules = WOLD_WAHID_SCHEDULE.filter((s) => s.gradeLevel === selectedGrade);
 
   return (
-    <div className="min-h-screen bg-[#062414] text-slate-100 flex flex-col font-sans select-none">
-      {/* Top Header */}
-      <header className="bg-[#09351c] border-b border-[#0f4425] px-4 py-3 sticky top-0 z-40 shadow-lg">
-        <div className="max-w-4xl mx-auto flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-full border-2 border-amber-400 overflow-hidden bg-[#062414] p-0.5 shrink-0">
+    <div className="min-h-screen bg-[#062414] text-slate-100 flex flex-col font-sans">
+      {/* Top Header - Improved responsiveness */}
+      <header className="bg-[#09351c]/95 backdrop-blur-md border-b border-[#0f4425] px-4 py-4 sticky top-0 z-50 shadow-xl">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-full border-2 border-amber-400 overflow-hidden bg-[#062414] p-0.5 shrink-0 shadow-lg">
               <img src={WOLD_WAHID_LOGO} alt="Wold Wahid" className="w-full h-full object-cover rounded-full" />
             </div>
-            <div>
-              <h1 className="text-xs sm:text-sm font-bold text-amber-300 truncate">
-                መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን
+            <div className="min-w-0">
+              <h1 className="text-sm sm:text-base font-black text-white truncate uppercase tracking-tight">
+                የወልድ ዋሕድ ሰንበት ት/ቤት
               </h1>
-              <p className="text-[10px] text-emerald-200/70">የወልደ ዋሕድ ሰንበት ት/ቤት ተማሪዎች ፖርታል</p>
+              <p className="text-[10px] text-amber-400 font-bold tracking-widest uppercase">Students Portal</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => setActiveTab('register')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition-colors cursor-pointer shrink-0"
+              className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-amber-500 hover:bg-amber-400 text-slate-950 transition-all shadow-lg active:scale-95"
             >
-              <UserPlus className="w-3.5 h-3.5" />
+              <UserPlus className="w-4 h-4" />
               <span>ምዝገባ</span>
             </button>
             <button
               onClick={onOpenAdminLogin}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-[#062414] hover:bg-emerald-950 text-amber-400 border border-[#0f4425] transition-colors cursor-pointer shrink-0"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-[#062414] hover:bg-emerald-900 text-amber-400 border border-[#0f4425] transition-all shadow-md active:scale-95"
             >
               <span>🔐 አድሚን</span>
             </button>
@@ -176,102 +214,119 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
         </div>
       </header>
 
-      {/* Navigation Tabs */}
-      <div className="bg-[#09351c]/80 border-b border-[#0f4425] px-4 py-2 sticky top-[57px] z-30">
-        <div className="max-w-4xl mx-auto flex items-center justify-center gap-2 overflow-x-auto py-1">
+      {/* Navigation Tabs - More visual weight */}
+      <div className="bg-[#09351c]/90 backdrop-blur-md border-b border-[#0f4425] px-2 py-3 sticky top-[77px] z-40">
+        <div className="max-w-5xl mx-auto flex items-center justify-start sm:justify-center gap-2 overflow-x-auto no-scrollbar">
           {[
-            { id: 'card' as const, label: '🪪 ዲጂታል መታወቂያ (ID)' },
-            { id: 'schedule' as const, label: '🗓️ መርሐ ግብር (Schedule)' },
-            { id: 'attendance' as const, label: '📊 የመገኘት ታሪክ' },
-            { id: 'register' as const, label: '📝 አዲስ ምዝገባ (10 መስኮች)' },
+            { id: 'card' as const, label: '🪪 መታወቂያ', icon: QrCode },
+            { id: 'schedule' as const, label: '🗓️ መርሐ ግብር', icon: Calendar },
+            { id: 'attendance' as const, label: '📊 የመገኘት ታሪክ', icon: UserCheck },
+            { id: 'leave' as const, label: '✉️ የፈቃድ መጠየቂያ', icon: FileText },
+            { id: 'register' as const, label: '📝 አዲስ ምዝገባ', icon: UserPlus },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+              className={`px-4 py-2.5 rounded-xl text-[11px] font-black transition-all whitespace-nowrap flex items-center gap-2 shadow-sm ${
                 activeTab === tab.id
-                  ? 'bg-amber-500 text-slate-950 shadow-md'
-                  : 'bg-[#062414] text-emerald-200/70 hover:text-white border border-[#0f4425]'
+                  ? 'bg-amber-500 text-slate-950 scale-105 ring-2 ring-amber-400/50'
+                  : 'bg-[#062414]/60 text-emerald-100/70 hover:text-white border border-[#0f4425]'
               }`}
             >
-              {tab.label}
+              <tab.icon className="w-3.5 h-3.5" />
+              <span>{tab.label}</span>
             </button>
           ))}
         </div>
       </div>
 
       {/* Main Body */}
-      <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6 space-y-6">
-        {/* Search Student Bar */}
-        <form onSubmit={handleSearchStudent} className="flex items-center gap-2 max-w-md mx-auto bg-[#09351c] p-2 rounded-2xl border border-[#0f4425]">
-          <Search className="w-4 h-4 text-amber-400 ml-2 shrink-0" />
+      <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-8 space-y-8 animate-in fade-in duration-500">
+        {/* Search Student Bar - More distinct */}
+        <form onSubmit={handleSearchStudent} className="flex items-center gap-3 max-w-lg mx-auto bg-[#09351c] p-2.5 rounded-2xl border border-[#0f4425] shadow-2xl focus-within:border-amber-500/50 transition-all">
+          <Search className="w-5 h-5 text-amber-500 ml-2 shrink-0" />
           <input
             type="text"
             value={searchCode}
             onChange={(e) => setSearchCode(e.target.value)}
-            placeholder="የተማሪ መታወቂያ ቁጥር ወይም ስም ያስገቡ..."
-            className="w-full bg-transparent text-xs text-white placeholder-emerald-700/60 focus:outline-none px-2"
+            placeholder="በመታወቂያ ቁጥር ወይም በስም ይፈልጉ..."
+            className="w-full bg-transparent text-sm text-white placeholder-emerald-800/60 focus:outline-none px-2 font-medium"
           />
           <button
             type="submit"
-            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold shrink-0 cursor-pointer"
+            className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black shadow-lg transition-all active:scale-95"
           >
             ፈልግ
           </button>
         </form>
 
         {activeTab === 'card' && (
-          <div className="space-y-6">
+          <div className="space-y-8 py-4">
             {selectedStudent ? (
-              <div className="max-w-sm mx-auto bg-gradient-to-b from-[#09351c] to-[#062414] border-2 border-amber-500/50 rounded-3xl p-6 shadow-2xl relative text-slate-100">
-                <div className="absolute top-3 right-3 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-400/40">
-                  {selectedStudent.status === 'active' ? '🟢 ንቁ ተማሪ' : '⏳ በመጠባበቅ ላይ'}
+              <div className="max-w-sm mx-auto bg-gradient-to-b from-[#0a4123] to-[#062414] border-2 border-amber-500/40 rounded-[2.5rem] p-8 shadow-[0_20px_50px_rgba(0,0,0,0.5)] relative text-slate-100 overflow-hidden group">
+                {/* Decorative Elements */}
+                <div className="absolute -top-10 -right-10 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl group-hover:bg-amber-500/20 transition-all duration-500"></div>
+                <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl group-hover:bg-emerald-500/20 transition-all duration-500"></div>
+
+                <div className="absolute top-5 right-5 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  {selectedStudent.status === 'active' ? '● Active' : '⏳ Pending'}
                 </div>
 
-                <div className="text-center space-y-3 mb-6">
-                  <div className="w-16 h-16 rounded-full border-2 border-amber-400 mx-auto overflow-hidden bg-emerald-950 shadow-md">
-                    <img src={selectedStudent.photoUrl || WOLD_WAHID_LOGO} alt="Student" className="w-full h-full object-cover" />
+                <div className="text-center space-y-4 mb-8">
+                  <div className="relative inline-block">
+                    <div className="absolute -inset-1 bg-amber-500/30 rounded-full blur"></div>
+                    <div className="relative w-24 h-24 rounded-full border-2 border-amber-400 mx-auto overflow-hidden bg-emerald-950 shadow-2xl">
+                      <img 
+                        src={selectedStudent.photoUrl || WOLD_WAHID_LOGO} 
+                        alt="Student" 
+                        className="w-full h-full object-cover" 
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
                   </div>
                   <div>
-                    <h2 className="text-base font-bold text-white">{selectedStudent.fullNameAm}</h2>
-                    <p className="text-xs text-amber-300 font-mono font-semibold">{selectedStudent.code}</p>
-                    <p className="text-[11px] text-emerald-200/80">መካነ ቅዱሳን ኢያቄም ወሐና ሰ/ት/ቤት</p>
+                    <h2 className="text-xl font-black text-white leading-tight">{selectedStudent.fullNameAm}</h2>
+                    <p className="text-xs text-amber-500 font-black tracking-widest mt-1 uppercase">{selectedStudent.code}</p>
+                    <p className="text-[10px] text-emerald-200/50 font-medium mt-2 uppercase tracking-tighter italic">መካነ ቅዱሳን ኢያቄም ወሐና ሰ/ት/ቤት</p>
                   </div>
                 </div>
 
-                <div className="bg-[#062414]/80 rounded-2xl p-3.5 border border-[#0f4425] text-xs space-y-2 mb-4">
-                  <div className="flex justify-between">
-                    <span className="text-emerald-200/70">ስልክ ቁጥር:</span>
-                    <span className="font-mono text-white">{selectedStudent.phone || 'N/A'}</span>
+                <div className="bg-[#062414]/90 rounded-3xl p-5 border border-[#0f4425] text-xs space-y-3 mb-6 shadow-inner">
+                  <div className="flex justify-between items-center pb-2 border-b border-[#0f4425]/50">
+                    <span className="text-emerald-200/60 font-bold uppercase tracking-tighter">ስልክ / Phone</span>
+                    <span className="font-black text-white font-mono">{selectedStudent.phone || 'N/A'}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-emerald-200/70">የአገልግሎት ክፍል:</span>
-                    <span className="font-semibold text-amber-400">{selectedStudent.department}</span>
+                  <div className="flex justify-between items-center pb-2 border-b border-[#0f4425]/50">
+                    <span className="text-emerald-200/60 font-bold uppercase tracking-tighter">ክፍል / Dept</span>
+                    <span className="font-black text-amber-400">{selectedStudent.department}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-emerald-200/70">ክፍለ ከተማ / አድራሻ:</span>
-                    <span className="text-white">{selectedStudent.subcity || 'አዲስ አበባ'}</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-emerald-200/60 font-bold uppercase tracking-tighter">አድራሻ / Address</span>
+                    <span className="font-black text-white">{selectedStudent.subcity || 'አዲስ አበባ'}</span>
                   </div>
                 </div>
 
-                <div className="text-center bg-white p-3 rounded-2xl">
-                  <p className="text-[10px] text-slate-950 font-bold mb-1">የመገኘት QR ኮድ (Attendance QR)</p>
-                  <div className="flex justify-center">
+                <div className="text-center bg-white p-5 rounded-[2rem] shadow-2xl">
+                  <p className="text-[11px] text-slate-950 font-black mb-3 uppercase tracking-tighter italic border-b border-slate-100 pb-2">የመገኘት QR ኮድ (Attendance)</p>
+                  <div className="flex justify-center p-2 bg-slate-50 rounded-2xl">
                     <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(selectedStudent.code)}`}
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=160x140&data=${encodeURIComponent(selectedStudent.code)}`}
                       alt="QR Code"
                       className="w-32 h-32 rounded-lg"
                     />
                   </div>
-                  <p className="text-[10px] text-slate-600 mt-1">በክፍል ሰዓት ለአስተዳዳሪው ያሳዩ</p>
+                  <p className="text-[9px] text-slate-500 font-bold mt-3 leading-tight uppercase">በክፍል ሰዓት ለአስተዳዳሪው ያሳዩ<br/>Present this at entry</p>
                 </div>
               </div>
             ) : (
-              <div className="text-center py-12 bg-[#09351c]/60 rounded-3xl border border-[#0f4425] p-6 space-y-4">
-                <p className="text-sm text-emerald-200">ምንም ተማሪ አልተመረጠም። እባክዎ ከላይ በቁጥር ወይም በስም ይፈልጉ ወይም አዲስ ምዝገባ ያድርጉ።</p>
+              <div className="text-center py-20 bg-[#09351c]/40 rounded-[3rem] border border-[#0f4425] p-10 space-y-6 shadow-xl">
+                <div className="w-20 h-20 bg-[#062414] rounded-3xl flex items-center justify-center mx-auto border border-[#0f4425] text-amber-500/20">
+                  <QrCode className="w-10 h-10" />
+                </div>
+                <p className="text-sm text-emerald-200/70 font-bold max-w-xs mx-auto">ምንም ተማሪ አልተመረጠም። እባክዎ ከላይ በመታወቂያ ቁጥር ይፈልጉ ወይም አዲስ ይመዝገቡ።</p>
                 <button
                   onClick={() => setActiveTab('register')}
-                  className="px-5 py-2.5 rounded-xl bg-amber-500 text-slate-950 text-xs font-bold cursor-pointer"
+                  className="px-8 py-3 rounded-2xl bg-amber-500 text-slate-950 text-xs font-black shadow-lg shadow-amber-500/20 active:scale-95 transition-all"
                 >
                   አዲስ ተማሪ ይመዝገቡ
                 </button>
@@ -281,21 +336,21 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
         )}
 
         {activeTab === 'schedule' && (
-          <div className="space-y-4">
-            <div className="flex justify-center gap-2">
+          <div className="space-y-6">
+            <div className="flex justify-center gap-2 overflow-x-auto pb-2 px-2 no-scrollbar">
               {[
-                { id: 'pre_kg' as const, label: 'ቅድመ አንደኛ' },
-                { id: 'grade_1_2' as const, label: '1–2ኛ ክፍል' },
-                { id: 'grade_3_5' as const, label: '3–5ኛ ክፍል' },
-                { id: 'grade_6_9' as const, label: '6–9ኛ ክፍል' },
+                { id: 'pre_kg' as const, label: '🧸 ቅድመ አንደኛ' },
+                { id: 'grade_1_2' as const, label: '🎒 1–2ኛ ክፍል' },
+                { id: 'grade_3_5' as const, label: '📚 3–5ኛ ክፍል' },
+                { id: 'grade_6_9' as const, label: '🎓 6–9ኛ ክፍል' },
               ].map((g) => (
                 <button
                   key={g.id}
                   onClick={() => setSelectedGrade(g.id)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${
+                  className={`px-5 py-2.5 rounded-2xl text-[11px] font-black transition-all whitespace-nowrap shadow-md ${
                     selectedGrade === g.id
-                      ? 'bg-amber-500 text-slate-950'
-                      : 'bg-[#09351c] text-emerald-200/80 border border-[#0f4425]'
+                      ? 'bg-amber-500 text-slate-950 scale-105'
+                      : 'bg-[#09351c] text-emerald-100/70 border border-[#0f4425]'
                   }`}
                 >
                   {g.label}
@@ -303,222 +358,346 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
               ))}
             </div>
 
-            <div className="bg-[#09351c]/90 border border-[#0f4425] rounded-3xl p-5 space-y-3">
-              <h3 className="text-sm font-bold text-amber-300 border-b border-[#0f4425] pb-2">
-                የሰንበት ትምህርት ቤቱ ሳምንታዊ መርሐ ግብር
-              </h3>
-              <div className="space-y-2.5">
-                {gradeSchedules.map((sch) => (
-                  <div key={sch.id} className="bg-[#062414] p-3 rounded-xl border border-[#0f4425] flex items-center justify-between gap-3 text-xs">
-                    <div>
-                      <div className="font-bold text-white">{sch.activity}</div>
-                      <div className="text-[11px] text-emerald-200/70">{sch.departmentResponsible}</div>
-                    </div>
-                    <div className="text-right font-mono text-amber-400">
-                      <div>{sch.timeRange}</div>
-                      <div className="text-[10px] text-slate-400">{sch.dayAm}</div>
-                    </div>
-                  </div>
-                ))}
+            <div className="bg-[#09351c]/95 border border-[#0f4425] rounded-[2.5rem] p-6 sm:p-10 shadow-2xl space-y-6">
+              <div className="flex items-center gap-4 border-b border-[#0f4425]/50 pb-5">
+                <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500 border border-amber-500/20">
+                  <Calendar className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white uppercase tracking-tight">ሳምንታዊ መርሐ ግብር</h3>
+                  <p className="text-xs text-emerald-200/50">Weekly Class Schedule Overview</p>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
 
-        {activeTab === 'attendance' && selectedStudent && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="bg-[#09351c] p-3 rounded-2xl border border-[#0f4425]">
-                <div className="text-lg font-bold text-emerald-400">{presentCount}</div>
-                <div className="text-[11px] text-emerald-200/70">የተገኙበት</div>
-              </div>
-              <div className="bg-[#09351c] p-3 rounded-2xl border border-[#0f4425]">
-                <div className="text-lg font-bold text-amber-400">{attendanceRate}%</div>
-                <div className="text-[11px] text-emerald-200/70">የተገኝነት ምጣኔ</div>
-              </div>
-              <div className="bg-[#09351c] p-3 rounded-2xl border border-[#0f4425]">
-                <div className="text-lg font-bold text-rose-400">{absentCount}</div>
-                <div className="text-[11px] text-emerald-200/70">የቀሩበት</div>
-              </div>
-            </div>
-
-            <div className="bg-[#09351c]/90 border border-[#0f4425] rounded-3xl p-4 space-y-3">
-              <h3 className="text-xs font-bold text-amber-300">የቅርብ ጊዜ የመገኘት ታሪክ ({selectedStudent.fullNameAm})</h3>
-              <div className="space-y-2">
-                {studentRecords.length > 0 ? (
-                  studentRecords.map((rec) => (
-                    <div key={rec.id} className="bg-[#062414] p-3 rounded-xl border border-[#0f4425] flex items-center justify-between text-xs">
-                      <div>
-                        <div className="font-semibold text-white">{rec.sessionName}</div>
-                        <div className="text-[10px] text-slate-400">{rec.date} | {rec.timestamp}</div>
+              <div className="space-y-3">
+                {gradeSchedules.length > 0 ? (
+                  gradeSchedules.map((sch) => (
+                    <div key={sch.id} className="group bg-[#062414]/80 p-5 rounded-3xl border border-[#0f4425] hover:border-amber-500/40 transition-all flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-900/30 flex items-center justify-center text-amber-500 group-hover:scale-110 transition-transform">
+                          {sch.activity.includes('መዝሙር') ? <Music className="w-5 h-5" /> : sch.activity.includes('ትምህርት') ? <BookOpen className="w-5 h-5" /> : <Scroll className="w-5 h-5" />}
+                        </div>
+                        <div>
+                          <div className="font-black text-white text-sm tracking-tight">{sch.activity}</div>
+                          <div className="text-[10px] text-emerald-200/50 font-bold uppercase mt-1">{sch.departmentResponsible}</div>
+                        </div>
                       </div>
-                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                        rec.status === 'absent' ? 'bg-rose-500/20 text-rose-300' : 'bg-emerald-500/20 text-emerald-300'
-                      }`}>
-                        {rec.status === 'absent' ? 'አልተገኘም' : 'ተገኝቷል'}
-                      </span>
+                      <div className="text-right">
+                        <div className="font-black text-amber-400 font-mono text-sm">{sch.timeRange}</div>
+                        <div className="text-[10px] text-slate-500 font-bold uppercase mt-1">{sch.dayAm}</div>
+                      </div>
                     </div>
                   ))
                 ) : (
-                  <p className="text-xs text-emerald-200/70 text-py-4 text-center">ምንም የመገኘት ታሪክ አልተመዘገበም።</p>
+                  <p className="text-center py-10 text-emerald-200/40 text-xs font-bold italic">ለዚህ ክፍል የተመዘገበ መርሐ ግብር አልተገኘም።</p>
                 )}
               </div>
             </div>
           </div>
         )}
 
-        {activeTab === 'register' && (
-          <div className="max-w-xl mx-auto bg-[#09351c]/95 border border-[#0f4425] rounded-3xl p-6 shadow-2xl space-y-5">
-            <div>
-              <h2 className="text-base font-bold text-amber-300">አስፈላጊ የ10 መስኮች (Fields) የተማሪ ምዝገባ</h2>
-              <p className="text-xs text-emerald-200/70 mt-0.5">መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን · የወልደ ዋሕድ ሰንበት ት/ቤት</p>
+        {activeTab === 'attendance' && selectedStudent && (
+          <div className="space-y-8 animate-in zoom-in-95 duration-300">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-emerald-950/40 p-6 rounded-[2rem] border border-emerald-500/20 text-center shadow-lg group hover:bg-emerald-950/60 transition-all">
+                <div className="text-3xl font-black text-emerald-400 mb-1">{presentCount}</div>
+                <div className="text-[10px] text-emerald-200/60 font-black uppercase tracking-widest">የተገኙበት (Present)</div>
+              </div>
+              <div className="bg-amber-950/40 p-6 rounded-[2rem] border border-amber-500/20 text-center shadow-lg group hover:bg-amber-950/60 transition-all">
+                <div className="text-3xl font-black text-amber-400 mb-1">{attendanceRate}%</div>
+                <div className="text-[10px] text-amber-200/60 font-black uppercase tracking-widest">ምጣኔ (Rate)</div>
+              </div>
+              <div className="bg-rose-950/40 p-6 rounded-[2rem] border border-rose-500/20 text-center shadow-lg group hover:bg-rose-950/60 transition-all">
+                <div className="text-3xl font-black text-rose-400 mb-1">{absentCount}</div>
+                <div className="text-[10px] text-rose-200/60 font-black uppercase tracking-widest">የቀሩበት (Absent)</div>
+              </div>
             </div>
 
-            {regSuccessMsg && (
-              <div className="p-3 bg-emerald-950 border border-emerald-500 rounded-xl text-xs text-emerald-200">
-                {regSuccessMsg}
-              </div>
-            )}
-
-            <form onSubmit={handleRegistrationSubmit} className="space-y-3.5 text-xs">
-              <div>
-                <label className="block text-emerald-100 font-semibold mb-1">1. ሙሉ ስም (ስም፣ የአባት ስም፣ የአያት ስም) *</label>
-                <input
-                  type="text"
-                  required
-                  value={regFullName}
-                  onChange={(e) => setRegFullName(e.target.value)}
-                  placeholder="ምሳሌ: ዳዊት ተስፋዬ ገብሬ"
-                  className="w-full px-3 py-2 bg-[#062414] border border-[#0f4425] rounded-xl text-white focus:outline-none focus:border-amber-400"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-emerald-100 font-medium mb-1">2. የክርስትና ስም *</label>
-                  <input
-                    type="text"
-                    required
-                    value={regChristianName}
-                    onChange={(e) => setRegChristianName(e.target.value)}
-                    placeholder="ምሳሌ: ወልደ ማርያም"
-                    className="w-full px-3 py-2 bg-[#062414] border border-[#0f4425] rounded-xl text-white focus:outline-none focus:border-amber-400"
-                  />
+            <div className="bg-[#09351c]/95 border border-[#0f4425] rounded-[2.5rem] p-6 sm:p-10 shadow-2xl space-y-6">
+              <div className="flex items-center gap-4 border-b border-[#0f4425]/50 pb-5">
+                <div className="w-12 h-12 bg-sky-500/10 rounded-2xl flex items-center justify-center text-sky-400 border border-sky-500/20">
+                  <UserCheck className="w-6 h-6" />
                 </div>
                 <div>
-                  <label className="block text-emerald-100 font-medium mb-1">3. ጾታ (Gender) *</label>
-                  <select
-                    value={regGender}
-                    onChange={(e) => setRegGender(e.target.value as 'male' | 'female')}
-                    className="w-full px-3 py-2 bg-[#062414] border border-[#0f4425] rounded-xl text-white focus:outline-none focus:border-amber-400"
-                  >
-                    <option value="male">ወንድ (Male)</option>
-                    <option value="female">ሴት (Female)</option>
-                  </select>
+                  <h3 className="text-lg font-black text-white uppercase tracking-tight">የቅርብ ጊዜ የመገኘት ታሪክ</h3>
+                  <p className="text-xs text-emerald-200/50">Recent Attendance History</p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-emerald-100 font-medium mb-1">4. የትውልድ ዘመን / ዕድሜ *</label>
-                  <input
-                    type="text"
-                    required
-                    value={regBirthDate}
-                    onChange={(e) => setRegBirthDate(e.target.value)}
-                    placeholder="ምሳሌ: 1998 ዓ.ም (ወይንም 20 ዓመት)"
-                    className="w-full px-3 py-2 bg-[#062414] border border-[#0f4425] rounded-xl text-white focus:outline-none focus:border-amber-400"
-                  />
+              <div className="space-y-3">
+                {studentRecords.length > 0 ? (
+                  studentRecords.map((rec) => (
+                    <div key={rec.id} className="bg-[#062414]/80 p-5 rounded-3xl border border-[#0f4425] flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className={`w-3 h-3 rounded-full shadow-lg ${rec.status === 'absent' ? 'bg-rose-500 shadow-rose-500/20' : 'bg-emerald-500 shadow-emerald-500/20'}`}></div>
+                        <div>
+                          <div className="font-black text-white text-sm tracking-tight">{rec.sessionName}</div>
+                          <div className="text-[10px] text-emerald-200/40 font-bold uppercase mt-1">{rec.date} · {rec.timestamp}</div>
+                        </div>
+                      </div>
+                      <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tighter ${
+                        rec.status === 'absent' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                      }`}>
+                        {rec.status === 'absent' ? 'አልተገኘም' : 'ተገኝቷል'}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-center py-10 text-emerald-200/40 text-xs font-bold italic">ምንም የመገኘት ታሪክ አልተመዘገበም።</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'leave' && (
+          <div className="max-w-xl mx-auto space-y-8 py-4">
+            <div className="bg-[#09351c]/95 border-2 border-[#0f4425] rounded-[3rem] p-8 sm:p-12 shadow-[0_20px_50px_rgba(0,0,0,0.5)] space-y-8">
+              <div className="text-center space-y-2">
+                <div className="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500 mx-auto border border-amber-500/20 mb-4">
+                  <FileText className="w-8 h-8" />
                 </div>
-                <div>
-                  <label className="block text-emerald-100 font-medium mb-1">5. ስልክ ቁጥር *</label>
-                  <input
-                    type="tel"
-                    required
-                    value={regPhone}
-                    onChange={(e) => setRegPhone(e.target.value)}
-                    placeholder="0911223344"
-                    className="w-full px-3 py-2 bg-[#062414] border border-[#0f4425] rounded-xl text-white font-mono focus:outline-none focus:border-amber-400"
-                  />
-                </div>
+                <h2 className="text-2xl font-black text-white uppercase tracking-tight">የፈቃድ መጠየቂያ</h2>
+                <p className="text-xs text-emerald-200/50 font-bold tracking-widest uppercase">Student Leave Request</p>
               </div>
 
-              <div>
-                <label className="block text-emerald-100 font-medium mb-1">6. የመኖሪያ አድራሻ (ወረዳ / ሰፈር) *</label>
-                <input
-                  type="text"
-                  required
-                  value={regAddress}
-                  onChange={(e) => setRegAddress(e.target.value)}
-                  placeholder="ምሳሌ: አዲስ አበባ, ቦሌ ወረዳ 03"
-                  className="w-full px-3 py-2 bg-[#062414] border border-[#0f4425] rounded-xl text-white focus:outline-none focus:border-amber-400"
-                />
+              {!selectedStudent ? (
+                <div className="p-10 bg-[#062414]/60 rounded-3xl border border-amber-500/20 text-center">
+                  <ShieldAlert className="w-10 h-10 text-amber-500/40 mx-auto mb-4" />
+                  <p className="text-sm text-emerald-200/70 font-bold">የፈቃድ ጥያቄ ለመላክ በመጀመሪያ ተማሪዎን ከላይ ይፈልጉ።</p>
+                </div>
+              ) : (
+                <>
+                  {leaveSuccessMsg && (
+                    <div className="p-4 bg-emerald-950/80 border-2 border-emerald-500/50 rounded-2xl text-xs font-black text-emerald-300 text-center animate-in zoom-in-95 duration-300">
+                      {leaveSuccessMsg}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleLeaveSubmit} className="space-y-6">
+                    <div className="space-y-4 bg-[#062414]/40 p-6 rounded-3xl border border-[#0f4425]">
+                      <div>
+                        <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-2">የፈቃድ ዓይነት / Leave Type</label>
+                        <select
+                          value={leaveType}
+                          onChange={(e) => setLeaveType(e.target.value)}
+                          className="w-full bg-[#062414] border-2 border-[#0f4425] rounded-2xl px-5 py-3 text-sm text-white font-black focus:outline-none focus:border-amber-400 transition-all"
+                        >
+                          <option>Medical (የጤና)</option>
+                          <option>Travel (የጉዞ)</option>
+                          <option>Academic (የትምህርት)</option>
+                          <option>Family (የቤተሰብ)</option>
+                          <option>Other (ሌላ)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-2">ጊዜው / Duration (e.g. 2 weeks)</label>
+                        <input
+                          type="text"
+                          required
+                          value={leaveDuration}
+                          onChange={(e) => setLeaveDuration(e.target.value)}
+                          placeholder="ምሳሌ: ለ2 ሳምንት / ለዛሬ ብቻ"
+                          className="w-full bg-[#062414] border-2 border-[#0f4425] rounded-2xl px-5 py-3 text-sm text-white placeholder-emerald-900/60 font-black focus:outline-none focus:border-amber-400 transition-all"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-2">ምክንያት / Detailed Reason</label>
+                        <textarea
+                          required
+                          rows={4}
+                          value={leaveReason}
+                          onChange={(e) => setLeaveReason(e.target.value)}
+                          placeholder="እባክዎ የቀሩበትን ወይም የሚቀሩበትን ምክንያት በዝርዝር ይግለጹ..."
+                          className="w-full bg-[#062414] border-2 border-[#0f4425] rounded-3xl px-5 py-4 text-sm text-white placeholder-emerald-900/60 font-medium focus:outline-none focus:border-amber-400 transition-all resize-none"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isSubmittingLeave}
+                      className="w-full py-4 rounded-[2rem] bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm shadow-[0_10px_30px_rgba(245,158,11,0.2)] transition-all active:scale-95 disabled:opacity-50"
+                    >
+                      {isSubmittingLeave ? 'እየተላከ ነው...' : 'የፈቃድ ጥያቄውን ላክ (Send Request)'}
+                    </button>
+                  </form>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'register' && (
+          <div className="max-w-xl mx-auto space-y-8 py-4">
+            <div className="bg-[#09351c]/95 border-2 border-[#0f4425] rounded-[3rem] p-8 sm:p-12 shadow-[0_20px_50px_rgba(0,0,0,0.5)] space-y-8">
+              <div className="text-center space-y-2">
+                <div className="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center text-amber-500 mx-auto border border-amber-500/20 mb-4">
+                  <UserPlus className="w-8 h-8" />
+                </div>
+                <h2 className="text-2xl font-black text-white uppercase tracking-tight">የተማሪ ምዝገባ (10 መስኮች)</h2>
+                <p className="text-xs text-emerald-200/50 font-bold tracking-widest uppercase italic">Student Registration Application</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-emerald-100 font-medium mb-1">7. የቅርብ ተጠሪ ስም *</label>
-                  <input
-                    type="text"
-                    required
-                    value={regEmergencyName}
-                    onChange={(e) => setRegEmergencyName(e.target.value)}
-                    placeholder="የቤተሰብ ወይም ጠሪ ስም"
-                    className="w-full px-3 py-2 bg-[#062414] border border-[#0f4425] rounded-xl text-white focus:outline-none focus:border-amber-400"
-                  />
+              {regSuccessMsg && (
+                <div className="p-5 bg-emerald-950/80 border-2 border-emerald-500/50 rounded-2xl text-xs font-black text-emerald-300 text-center leading-relaxed">
+                  {regSuccessMsg}
                 </div>
-                <div>
-                  <label className="block text-emerald-100 font-medium mb-1">8. የቅርብ ተጠሪ ስልክ ቁጥር *</label>
-                  <input
-                    type="tel"
-                    required
-                    value={regEmergencyPhone}
-                    onChange={(e) => setRegEmergencyPhone(e.target.value)}
-                    placeholder="0911..."
-                    className="w-full px-3 py-2 bg-[#062414] border border-[#0f4425] rounded-xl text-white font-mono focus:outline-none focus:border-amber-400"
-                  />
-                </div>
-              </div>
+              )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-emerald-100 font-medium mb-1">9. የሚያገለግሉበት ክፍል *</label>
-                  <select
-                    value={regDepartment}
-                    onChange={(e) => setRegDepartment(e.target.value as SundaySchoolDepartment)}
-                    className="w-full px-3 py-2 bg-[#062414] border border-[#0f4425] rounded-xl text-white focus:outline-none focus:border-amber-400"
-                  >
-                    <option value="education">ትምህርት ክፍል</option>
-                    <option value="choir">መዝሙር ክፍል</option>
-                    <option value="arts">ኪነ ጥበብ ክፍል</option>
-                    <option value="abnet">አብነት ክፍል</option>
-                    <option value="discipline">ስነ ስርዓት ክፍል</option>
-                    <option value="general">አጠቃላይ አባል</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-emerald-100 font-medium mb-1">10. የመገለጫ ፎቶ ሊንክ (Photo URL)</label>
-                  <input
-                    type="url"
-                    value={regPhotoUrl}
-                    onChange={(e) => setRegPhotoUrl(e.target.value)}
-                    placeholder="https://... (የፎቶ ሊንክ)"
-                    className="w-full px-3 py-2 bg-[#062414] border border-[#0f4425] rounded-xl text-white font-mono focus:outline-none focus:border-amber-400"
-                  />
-                </div>
-              </div>
+              <form onSubmit={handleRegistrationSubmit} className="space-y-5 text-xs">
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1.5 ml-2">1. ሙሉ ስም (Full Name) *</label>
+                    <input
+                      type="text"
+                      required
+                      value={regFullName}
+                      onChange={(e) => setRegFullName(e.target.value)}
+                      placeholder="ምሳሌ: ዳዊት ተስፋዬ ገብሬ"
+                      className="w-full px-5 py-3.5 bg-[#062414] border-2 border-[#0f4425] rounded-2xl text-white font-black focus:outline-none focus:border-amber-400 shadow-inner"
+                    />
+                  </div>
 
-              <button
-                type="submit"
-                disabled={isSubmittingReg}
-                className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg transition-all cursor-pointer mt-4"
-              >
-                {isSubmittingReg ? 'እየተላከ ነው...' : 'የምዝገባ ጥያቄ ላክ (Submit 10 Fields)'}
-              </button>
-            </form>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1.5 ml-2">2. የክርስትና ስም *</label>
+                      <input
+                        type="text"
+                        required
+                        value={regChristianName}
+                        onChange={(e) => setRegChristianName(e.target.value)}
+                        placeholder="ምሳሌ: ወልደ ማርያም"
+                        className="w-full px-5 py-3.5 bg-[#062414] border-2 border-[#0f4425] rounded-2xl text-white font-black focus:outline-none focus:border-amber-400 shadow-inner"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1.5 ml-2">3. ጾታ (Gender) *</label>
+                      <select
+                        value={regGender}
+                        onChange={(e) => setRegGender(e.target.value as 'male' | 'female')}
+                        className="w-full px-5 py-3.5 bg-[#062414] border-2 border-[#0f4425] rounded-2xl text-white font-black focus:outline-none focus:border-amber-400 shadow-inner"
+                      >
+                        <option value="male">ወንድ (Male)</option>
+                        <option value="female">ሴት (Female)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1.5 ml-2">4. የትውልድ ዘመን *</label>
+                      <input
+                        type="text"
+                        required
+                        value={regBirthDate}
+                        onChange={(e) => setRegBirthDate(e.target.value)}
+                        placeholder="ምሳሌ: 1998 ዓ.ም"
+                        className="w-full px-5 py-3.5 bg-[#062414] border-2 border-[#0f4425] rounded-2xl text-white font-black focus:outline-none focus:border-amber-400 shadow-inner"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1.5 ml-2">5. ስልክ ቁጥር *</label>
+                      <input
+                        type="tel"
+                        required
+                        value={regPhone}
+                        onChange={(e) => setRegPhone(e.target.value)}
+                        placeholder="0911223344"
+                        className="w-full px-5 py-3.5 bg-[#062414] border-2 border-[#0f4425] rounded-2xl text-white font-mono font-black focus:outline-none focus:border-amber-400 shadow-inner"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1.5 ml-2">6. የመኖሪያ አድራሻ *</label>
+                    <input
+                      type="text"
+                      required
+                      value={regAddress}
+                      onChange={(e) => setRegAddress(e.target.value)}
+                      placeholder="ምሳሌ: አዲስ አበባ, ቦሌ ወረዳ 03"
+                      className="w-full px-5 py-3.5 bg-[#062414] border-2 border-[#0f4425] rounded-2xl text-white font-black focus:outline-none focus:border-amber-400 shadow-inner"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1.5 ml-2">7. የቅርብ ተጠሪ ስም *</label>
+                      <input
+                        type="text"
+                        required
+                        value={regEmergencyName}
+                        onChange={(e) => setRegEmergencyName(e.target.value)}
+                        placeholder="የቤተሰብ ስም"
+                        className="w-full px-5 py-3.5 bg-[#062414] border-2 border-[#0f4425] rounded-2xl text-white font-black focus:outline-none focus:border-amber-400 shadow-inner"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1.5 ml-2">8. ተጠሪ ስልክ ቁጥር *</label>
+                      <input
+                        type="tel"
+                        required
+                        value={regEmergencyPhone}
+                        onChange={(e) => setRegEmergencyPhone(e.target.value)}
+                        placeholder="0911..."
+                        className="w-full px-5 py-3.5 bg-[#062414] border-2 border-[#0f4425] rounded-2xl text-white font-mono font-black focus:outline-none focus:border-amber-400 shadow-inner"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1.5 ml-2">9. የሚያገለግሉበት ክፍል *</label>
+                      <select
+                        value={regDepartment}
+                        onChange={(e) => setRegDepartment(e.target.value as SundaySchoolDepartment)}
+                        className="w-full px-5 py-3.5 bg-[#062414] border-2 border-[#0f4425] rounded-2xl text-white font-black focus:outline-none focus:border-amber-400 shadow-inner"
+                      >
+                        <option value="education">ትምህርት ክፍል</option>
+                        <option value="choir">መዝሙር ክፍል</option>
+                        <option value="arts">ኪነ ጥበብ ክፍል</option>
+                        <option value="abnet">አብነት ክፍል</option>
+                        <option value="discipline">ስነ ስርዓት ክፍል</option>
+                        <option value="general">አጠቃላይ አባል</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1.5 ml-2">10. ፎቶ ሊንክ (Photo URL)</label>
+                      <input
+                        type="url"
+                        value={regPhotoUrl}
+                        onChange={(e) => setRegPhotoUrl(e.target.value)}
+                        placeholder="https://... (ከተገኘ)"
+                        className="w-full px-5 py-3.5 bg-[#062414] border-2 border-[#0f4425] rounded-2xl text-white font-mono font-black focus:outline-none focus:border-amber-400 shadow-inner"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmittingReg}
+                  className="w-full py-4 rounded-[2rem] bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm shadow-[0_10px_30px_rgba(245,158,11,0.2)] transition-all active:scale-95 disabled:opacity-50 mt-6"
+                >
+                  {isSubmittingReg ? 'እየተላከ ነው...' : 'የምዝገባ ጥያቄውን ላክ (Submit)'}
+                </button>
+              </form>
+            </div>
           </div>
         )}
       </main>
+
+      {/* Footer */}
+      <footer className="bg-[#062414] border-t border-[#0f4425] py-8 px-6 text-center">
+        <p className="text-[10px] text-emerald-200/40 font-bold tracking-widest uppercase leading-loose">
+          መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን<br/>
+          የወልድ ዋሕድ ሰንበት ትምህርት ቤት · {new Date().getFullYear()}<br/>
+          የተማሪዎች ዲጂታል ፖርታል ሥርዓት
+        </p>
+      </footer>
     </div>
   );
 };

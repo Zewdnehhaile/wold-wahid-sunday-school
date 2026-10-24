@@ -1144,10 +1144,13 @@ export async function handleTelegramUpdate(update: any) {
             address: session.data.address,
             emergencyContact: {
               name: session.data.emergencyName,
-              phone: session.data.emergencyPhone
+              phone: session.data.emergencyPhone,
+              relation: 'ቤተሰብ / Family'
             },
             department: session.data.department,
-            photoUrl: session.data.photo,
+            photoUrl: session.data.photo.startsWith('tg_file:') 
+              ? `/api/telegram/file/${session.data.photo.replace('tg_file:', '')}` 
+              : session.data.photo,
             status: 'pending',
             telegramId: telegramId,
             telegramUsername: msg.from?.username || '',
@@ -1327,4 +1330,6 @@ if (!token || token.startsWith('PASTE_') || token === 'YOUR_TELEGRAM_BOT_TOKEN')
   }
 }
 
-export const bot = botInstance;
+export function getBot() {
+  return botInstance;
+}

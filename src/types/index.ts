@@ -53,6 +53,8 @@ export interface Member {
   gradeLevel?: GradeLevel;
   roleAm: string;
   roleEn: string;
+  christianName?: string;
+  birthYear?: string;
   photoUrl: string;
   registeredDate: string;
   bloodGroup: string;

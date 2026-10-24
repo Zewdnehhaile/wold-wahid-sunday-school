@@ -51,6 +51,7 @@ export const MemberList: React.FC<MemberListProps> = ({
   const [selectedDept, setSelectedDept] = useState<string>('all');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [qrModalMember, setQrModalMember] = useState<Member | null>(null);
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
 
   // Auto-switch to pending tab if pending registrations arrive and no approved members exist
   React.useEffect(() => {
@@ -351,7 +352,8 @@ export const MemberList: React.FC<MemberListProps> = ({
                 displayedMembers.map((member) => (
                   <tr
                     key={member.id}
-                    className="hover:bg-slate-800/40 transition-colors group"
+                    className="hover:bg-slate-800/40 transition-colors group cursor-pointer"
+                    onClick={() => setSelectedMember(member)}
                   >
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-3">
@@ -402,7 +404,7 @@ export const MemberList: React.FC<MemberListProps> = ({
                       </p>
                     </td>
 
-                    <td className="py-3 px-4">
+                    <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                       {member.status === 'active' ? (
                         <span className="text-emerald-400 flex items-center gap-1 font-medium">
                           <CheckCircle2 className="w-3.5 h-3.5" /> ጸድቋል
@@ -414,18 +416,20 @@ export const MemberList: React.FC<MemberListProps> = ({
                       )}
                     </td>
 
-                    <td className="py-3 px-4 text-right">
+                    <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                       {member.status === 'pending_approval' ? (
                         <div className="flex items-center justify-end gap-2">
                           <button
-                            onClick={() => openApproveModal(member)}
+                            onClick={(e) => { e.stopPropagation(); openApproveModal(member); }}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shadow-sm"
                           >
                             <Key className="w-3.5 h-3.5" />
-                            <span>አጽድቅና ID ስጥ</span>
+                            <span className="hidden sm:inline">አጽድቅና ID ስጥ</span>
+                            <span className="sm:hidden">አጽድቅ</span>
                           </button>
                           <button
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               if (confirm(`${member.fullNameAm} የተባለውን ተማሪ ማመልከቻ ውድቅ ማድረግ ይፈልጋሉ?`)) {
                                 onRejectMember(member.id);
                               }
@@ -439,36 +443,37 @@ export const MemberList: React.FC<MemberListProps> = ({
                       ) : (
                         <div className="flex items-center justify-end gap-1.5">
                           <button
-                            onClick={() => setQrModalMember(member)}
+                            onClick={(e) => { e.stopPropagation(); setQrModalMember(member); }}
                             title={dict.members.scanQr}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-colors"
+                            className="p-2 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-colors"
                           >
-                            <QrCode className="w-4 h-4" />
+                            <QrCode className="w-5 h-5" />
                           </button>
                           <button
-                            onClick={() => onOpenCardStudio(member)}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-medium transition-colors"
+                            onClick={(e) => { e.stopPropagation(); onOpenCardStudio(member); }}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-black transition-colors"
                           >
-                            <Printer className="w-3.5 h-3.5" />
-                            <span>{dict.members.printBadge}</span>
+                            <Printer className="w-4 h-4" />
+                            <span className="hidden sm:inline">{dict.members.printBadge}</span>
                           </button>
                           <button
-                            onClick={() => setEditingMember(member)}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-sky-400 hover:bg-slate-800 transition-colors"
+                            onClick={(e) => { e.stopPropagation(); setEditingMember(member); }}
+                            className="p-2 rounded-lg text-slate-400 hover:text-sky-400 hover:bg-slate-800 transition-colors"
                             title="አርትዕ (Edit)"
                           >
-                            <Edit className="w-4 h-4" />
+                            <Edit className="w-5 h-5" />
                           </button>
                           <button
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               if (confirm(`${member.fullNameAm} የተባለውን ተማሪ መሰረዝ ይፈልጋሉ?`)) {
                                 onDeleteMember?.(member.id);
                               }
                             }}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors"
+                            className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors"
                             title="ሰርዝ (Delete)"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 className="w-5 h-5" />
                           </button>
                         </div>
                       )}
@@ -576,6 +581,66 @@ export const MemberList: React.FC<MemberListProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Member Detail Modal */}
+      {selectedMember && (
+        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#09351c] border-2 border-[#0f4425] rounded-[2.5rem] w-full max-w-lg p-8 shadow-[0_20px_50px_rgba(0,0,0,0.5)] relative max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-300">
+            <button onClick={() => setSelectedMember(null)} className="absolute top-6 right-6 p-2 rounded-full bg-[#062414] text-slate-400 hover:text-white border border-[#0f4425] transition-all"><X className="w-6 h-6" /></button>
+            
+            <div className="flex items-center gap-6 mb-8 pb-6 border-b border-[#0f4425]/50">
+              <div className="relative">
+                <div className="absolute -inset-1 bg-amber-500/20 rounded-2xl blur"></div>
+                <img src={selectedMember.photoUrl} alt={selectedMember.fullNameAm} className="relative w-24 h-24 rounded-2xl object-cover border-2 border-amber-400 shadow-xl" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-2xl font-black text-white truncate leading-tight">{selectedMember.fullNameAm}</h3>
+                <p className="text-emerald-200/60 font-medium mb-2">{selectedMember.fullNameEn}</p>
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black uppercase tracking-widest">{selectedMember.code}</span>
+                  <span className="px-3 py-1 rounded-full bg-emerald-900/50 text-emerald-400 border border-emerald-500/20 text-[10px] font-black uppercase tracking-widest">{selectedMember.status === 'active' ? 'APPROVED' : 'PENDING'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-[11px]">
+              <div className="space-y-4">
+                <div className="group"><label className="text-emerald-500/60 font-black uppercase tracking-widest block mb-1">1. ሙሉ ስም</label><p className="text-white text-sm font-bold">{selectedMember.fullNameAm}</p></div>
+                <div><label className="text-emerald-500/60 font-black uppercase tracking-widest block mb-1">2. የክርስትና ስም</label><p className="text-white text-sm font-bold">{selectedMember.christianName || 'N/A'}</p></div>
+                <div><label className="text-emerald-500/60 font-black uppercase tracking-widest block mb-1">3. ጾታ</label><p className="text-white text-sm font-bold">{selectedMember.gender === 'male' ? 'ወንድ' : 'ሴት'}</p></div>
+                <div><label className="text-emerald-500/60 font-black uppercase tracking-widest block mb-1">4. የትውልድ ዘመን</label><p className="text-white text-sm font-bold">{selectedMember.birthYear || 'N/A'}</p></div>
+                <div><label className="text-emerald-500/60 font-black uppercase tracking-widest block mb-1">5. ስልክ ቁጥር</label><p className="text-amber-400 text-sm font-black font-mono">{selectedMember.phone}</p></div>
+              </div>
+              <div className="space-y-4">
+                <div><label className="text-emerald-500/60 font-black uppercase tracking-widest block mb-1">6. አድራሻ</label><p className="text-white text-sm font-bold">{selectedMember.subcity || 'N/A'}</p></div>
+                <div><label className="text-emerald-500/60 font-black uppercase tracking-widest block mb-1">9. የሚያገለግሉበት ክፍል</label><p className="text-amber-400 text-sm font-bold">{dict.departments[selectedMember.department] || selectedMember.department}</p></div>
+                <div><label className="text-emerald-500/60 font-black uppercase tracking-widest block mb-1">ክፍል ደረጃ</label><p className="text-white text-sm font-bold">{selectedMember.gradeLevel ? dict.grades[selectedMember.gradeLevel] : 'N/A'}</p></div>
+                <div className="pt-2 border-t border-[#0f4425]/50 mt-2">
+                  <label className="text-amber-500 font-black uppercase tracking-widest block mb-1">7/8. የአደጋ ጊዜ ተጠሪ</label>
+                  <p className="text-white text-sm font-bold leading-relaxed">{selectedMember.emergencyContact.name}</p>
+                  <p className="text-emerald-200/60 font-mono text-[10px] mt-1">{selectedMember.emergencyContact.phone} ({selectedMember.emergencyContact.relation})</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-10 flex items-center gap-3">
+              <button 
+                onClick={() => { setSelectedMember(null); setEditingMember(selectedMember); }}
+                className="flex-1 py-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2"
+              >
+                <Edit className="w-4 h-4" />
+                <span>መረጃውን አርትዕ (Edit Info)</span>
+              </button>
+              <button 
+                onClick={() => { setSelectedMember(null); setQrModalMember(selectedMember); }}
+                className="p-4 rounded-2xl bg-[#062414] text-amber-400 border border-[#0f4425] hover:bg-emerald-900 transition-all shadow-xl"
+              >
+                <QrCode className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -951,7 +1016,72 @@ export const MemberList: React.FC<MemberListProps> = ({
                     <option value="grade_1_2">1ኛ እና 2ኛ ክፍል (Grades 1-2)</option>
                     <option value="grade_3_5">3ኛ–5ኛ ክፍል (Grades 3-5)</option>
                     <option value="grade_6_9">6ኛ–9ኛ ክፍል (Grades 6-9)</option>
+                    <option value="leaders">አስተዳዳሪ (Leaders)</option>
                   </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-300 block mb-1 font-medium">ክርስትና ስም (Christian Name)</label>
+                  <input
+                    type="text"
+                    value={editingMember.christianName || ''}
+                    onChange={(e) => setEditingMember({ ...editingMember, christianName: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-300 block mb-1 font-medium">የትውልድ ዘመን (Birth Year)</label>
+                  <input
+                    type="text"
+                    value={editingMember.birthYear || ''}
+                    onChange={(e) => setEditingMember({ ...editingMember, birthYear: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-300 block mb-1 font-medium">ጾታ (Gender)</label>
+                  <select
+                    value={editingMember.gender}
+                    onChange={(e) => setEditingMember({ ...editingMember, gender: e.target.value as 'male' | 'female' })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-amber-400"
+                  >
+                    <option value="male">ወንድ (Male)</option>
+                    <option value="female">ሴት (Female)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-slate-300 block mb-1 font-medium">አድራሻ (Address)</label>
+                  <input
+                    type="text"
+                    value={editingMember.subcity || ''}
+                    onChange={(e) => setEditingMember({ ...editingMember, subcity: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                <p className="text-amber-400 font-bold">የአደጋ ጊዜ ተጠሪ (Emergency Contact)</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    placeholder="ስም (Name)"
+                    value={editingMember.emergencyContact.name}
+                    onChange={(e) => setEditingMember({ ...editingMember, emergencyContact: { ...editingMember.emergencyContact, name: e.target.value } })}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white"
+                  />
+                  <input
+                    type="text"
+                    placeholder="ስልክ (Phone)"
+                    value={editingMember.emergencyContact.phone}
+                    onChange={(e) => setEditingMember({ ...editingMember, emergencyContact: { ...editingMember.emergencyContact, phone: e.target.value } })}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-white font-mono"
+                  />
                 </div>
               </div>
 

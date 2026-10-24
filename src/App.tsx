@@ -8,9 +8,10 @@ import {
   AVATAR_FEMALE,
 } from './data/initialData';
 import { db } from './firebase';
-import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, getDocs, query, where, setDoc } from 'firebase/firestore';
 import { t } from './utils/translations';
 import { MemberList } from './components/MemberList';
+import { StudentPortalView } from './components/StudentPortalView';
 import { AttendanceScanner } from './components/AttendanceScanner';
 import { SupportDesk } from './components/SupportDesk';
 import { AnalyticsView } from './components/AnalyticsView';
@@ -58,6 +59,7 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState('members');
   const [isLangModalOpen, setIsLangModalOpen] = useState(false);
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
 
   // Live Firestore state (no mock data)
   const [registrations, setRegistrations] = useState<Member[]>([]);
@@ -97,7 +99,9 @@ export default function App() {
             gradeLevel: d.gradeLevel || 'general',
             roleAm: 'ተማሪ / Student',
             roleEn: 'Student',
-            photoUrl: d.photoUrl && !d.photoUrl.startsWith('tg_file:') ? d.photoUrl : (d.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE),
+            christianName: d.christianName || '',
+            birthYear: d.birthYear || d.birthDate || '',
+            photoUrl: d.photoUrl || (d.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE),
             registeredDate: d.submittedAt?.split('T')[0] || new Date().toISOString().split('T')[0],
             bloodGroup: d.bloodGroup || 'O+',
             emergencyContact: d.emergencyContact || { name: '', phone: '', relation: '' },
@@ -127,6 +131,8 @@ export default function App() {
           code: d.code || d.studentCode || 'WW-2026-0001',
           fullNameAm: d.fullNameAm || d.fullNameEn || '',
           fullNameEn: d.fullNameEn || d.fullNameAm || '',
+          christianName: d.christianName || '',
+          birthYear: d.birthYear || d.birthDate || '',
           phone: d.phone || '',
           gender: d.gender === 'female' ? 'female' : 'male',
           department: d.department || 'education',
@@ -137,7 +143,7 @@ export default function App() {
           registeredDate: d.registeredDate || new Date().toISOString().split('T')[0],
           bloodGroup: d.bloodGroup || 'O+',
           emergencyContact: d.emergencyContact || { name: '', phone: '', relation: '' },
-          subcity: d.subcity || '',
+          subcity: d.subcity || d.address || '',
           status: isPending ? 'pending_approval' : (d.status === 'rejected' ? 'rejected' : 'active'),
           telegramId: d.telegramId || '',
           telegramUsername: d.telegramUsername || '',
@@ -354,33 +360,32 @@ export default function App() {
         console.warn('Registration update notice:', err);
       });
 
-      // 2. Add or update active student record in students collection
+      // 2. Add or update active student record in students collection using the SAME ID as registration
       const studentData = {
         code: manualStudentId,
         studentCode: manualStudentId,
         fullNameAm: targetReg?.fullNameAm || 'ተማሪ',
         fullNameEn: targetReg?.fullNameEn || 'Student',
+        christianName: targetReg?.christianName || '',
+        birthYear: targetReg?.birthYear || '',
         phone: targetReg?.phone || '',
         gender: targetReg?.gender || 'male',
         department: targetReg?.department || 'education',
         gradeLevel: targetReg?.gradeLevel || 'general',
+        photoUrl: targetReg?.photoUrl || '',
+        emergencyContact: targetReg?.emergencyContact || { name: '', phone: '', relation: '' },
+        subcity: targetReg?.subcity || '',
         telegramId: targetReg?.telegramId || '',
         telegramUsername: targetReg?.telegramUsername || '',
         status: 'active',
         registeredDate: targetReg?.registeredDate || new Date().toISOString().split('T')[0],
         approvedBy: currentAdmin.nameAm,
         approvedAt: new Date().toISOString(),
+        consecutiveAbsences: 0,
       };
 
-      const existingStudentSnap = await getDocs(
-        query(collection(db, 'students'), where('code', '==', manualStudentId))
-      ).catch(() => null);
-
-      if (existingStudentSnap && !existingStudentSnap.empty) {
-        await updateDoc(doc(db, 'students', existingStudentSnap.docs[0].id), studentData);
-      } else {
-        await addDoc(collection(db, 'students'), studentData);
-      }
+      // Use setDoc with the same ID as the registration to ensure consistency
+      await setDoc(doc(db, 'students', memberId), studentData);
 
       // 3. Call backend approval API to trigger Telegram notification
       try {
@@ -457,15 +462,35 @@ export default function App() {
 
   const handleUpdateMember = async (updated: Member) => {
     try {
-      await updateDoc(doc(db, 'students', updated.id), {
+      const studentRef = doc(db, 'students', updated.id);
+      const regRef = doc(db, 'registrations', updated.id);
+
+      const updateData = {
         fullNameAm: updated.fullNameAm,
         fullNameEn: updated.fullNameEn,
+        christianName: updated.christianName || '',
+        birthYear: updated.birthYear || '',
+        gender: updated.gender,
         phone: updated.phone,
         department: updated.department,
         gradeLevel: updated.gradeLevel,
         code: updated.code,
         studentCode: updated.code,
+        subcity: updated.subcity || '',
+        emergencyContact: updated.emergencyContact || { name: '', phone: '', relation: '' },
+        photoUrl: updated.photoUrl,
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Try updating both collections to be safe
+      await updateDoc(studentRef, updateData).catch(() => console.log('Member not in students collection'));
+      await updateDoc(regRef, updateData).catch(() => console.log('Member not in registrations collection'));
+
+      setApprovalBanner({
+        message: 'የተማሪ መረጃ በተሳካ ሁኔታ ተስተካክሏል።',
+        type: 'success',
       });
+      setTimeout(() => setApprovalBanner(null), 3000);
     } catch (e) {
       console.error('Update member failed:', e);
     }
@@ -581,8 +606,8 @@ export default function App() {
     try {
       await deleteDoc(doc(db, 'leave_requests', requestId));
       await fetch(`/api/leave_requests/${requestId}`, { method: 'DELETE' }).catch(() => {});
-    } catch (e) {
-      console.error('Delete leave request failed:', e);
+    } catch (error) {
+      console.error('Delete leave request failed:', error);
     }
   };
 
@@ -609,6 +634,18 @@ export default function App() {
     );
   }
 
+  // Show Student Portal if not logged in as admin and in Telegram context
+  if (isTelegramContext && !isLoggedIn && !showAdminLogin) {
+    return (
+      <StudentPortalView
+        members={members}
+        attendance={attendance}
+        onOpenAdminLogin={() => setShowAdminLogin(true)}
+        lang={lang}
+      />
+    );
+  }
+
   if (!isLoggedIn) {
     return (
       <LoginPage
@@ -623,6 +660,7 @@ export default function App() {
           setIsLoggedIn(true);
           setActiveTab('attendance');
         }}
+        onOpenStudentPortal={isTelegramContext ? () => setShowAdminLogin(false) : undefined}
       />
     );
   }
@@ -630,146 +668,119 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#062414] text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
       {/* Top Bar Contract: Zone 1 (Wordmark) - Zone 2 (Nav Links) - Zone 3 (Profile & Logout) */}
-      <header className="no-print border-b border-[#0f4425] bg-[#09351c]/90 backdrop-blur-md sticky top-0 z-40 px-6 py-3.5 flex items-center justify-between gap-8 shadow-md shadow-emerald-950/40">
+      <header className="no-print border-b border-[#0f4425] bg-[#09351c]/95 backdrop-blur-xl sticky top-0 z-50 px-4 sm:px-8 py-5 flex items-center justify-between gap-8 shadow-2xl shadow-emerald-950/60 transition-all duration-300">
         {/* Zone 1: Brand Wordmark */}
-        <div className="flex items-center gap-3 shrink-0">
-          <img
-            src={FITHAPOL_LOGO}
-            alt="Wold Wahid Logo"
-            className="w-9 h-9 rounded-full border-2 border-amber-400 object-cover shadow-sm"
-            referrerPolicy="no-referrer"
-          />
-          <a href="#" className="text-base font-bold tracking-tight text-white whitespace-nowrap">
-            <span>የወልድ ዋሕድ</span>
-            <span className="text-amber-400 ml-1.5 font-medium font-sans">ሰ/ት/ቤት</span>
+        <div className="flex items-center gap-4 shrink-0">
+          <div className="relative group">
+            <div className="absolute -inset-1 bg-amber-500/20 rounded-full blur group-hover:bg-amber-500/40 transition duration-300"></div>
+            <img
+              src={FITHAPOL_LOGO}
+              alt="Wold Wahid Logo"
+              className="relative w-14 h-14 rounded-full border-2 border-amber-400 object-cover shadow-lg"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+          <a href="#" className="flex flex-col">
+            <span className="text-xl font-black tracking-tight text-white leading-tight uppercase">የወልድ ዋሕድ</span>
+            <span className="text-amber-400 text-[11px] font-black tracking-widest font-sans">ሰንበት ትምህርት ቤት</span>
           </a>
         </div>
 
-        {/* Zone 2: Concise Single-Line Nav Links */}
-        <nav className="hidden lg:flex items-center gap-5 text-xs font-medium text-emerald-100/90">
-          <button
-            onClick={() => setActiveTab('schedule')}
-            className={`transition-colors whitespace-nowrap shrink-0 hover:text-white ${
-              activeTab === 'schedule' ? 'text-amber-400 font-semibold border-b-2 border-amber-400 pb-1' : ''
-            }`}
-          >
-            {dict.nav.schedule}
-          </button>
-
-          <button
-            onClick={() => setActiveTab('members')}
-            className={`transition-colors whitespace-nowrap shrink-0 hover:text-white flex items-center gap-1.5 ${
-              activeTab === 'members' ? 'text-amber-400 font-semibold border-b-2 border-amber-400 pb-1' : ''
-            }`}
-          >
-            <span>{dict.nav.members}</span>
-            {pendingCount > 0 && (
-              <span className="bg-amber-500 text-slate-950 font-bold px-1.5 py-0.5 rounded-full text-[10px] animate-pulse">
-                {pendingCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveTab('attendance')}
-            className={`transition-colors whitespace-nowrap shrink-0 hover:text-white ${
-              activeTab === 'attendance' ? 'text-amber-400 font-semibold border-b-2 border-amber-400 pb-1' : ''
-            }`}
-          >
-            {dict.nav.attendance}
-          </button>
-
-          <button
-            onClick={() => setActiveTab('support')}
-            className={`transition-colors whitespace-nowrap shrink-0 hover:text-white ${
-              activeTab === 'support' ? 'text-amber-400 font-semibold border-b-2 border-amber-400 pb-1' : ''
-            }`}
-          >
-            {dict.nav.support}
-          </button>
-
-          <button
-            onClick={() => setActiveTab('admins')}
-            className={`transition-colors whitespace-nowrap shrink-0 hover:text-white ${
-              activeTab === 'admins' ? 'text-amber-400 font-semibold border-b-2 border-amber-400 pb-1' : ''
-            }`}
-          >
-            {dict.nav.admins}
-          </button>
-
-          <button
-            onClick={() => setActiveTab('analytics')}
-            className={`transition-colors whitespace-nowrap shrink-0 hover:text-white ${
-              activeTab === 'analytics' ? 'text-amber-400 font-semibold border-b-2 border-amber-400 pb-1' : ''
-            }`}
-          >
-            {dict.nav.analytics}
-          </button>
+        {/* Zone 2: Concise Single-Line Nav Links - Enhanced for visibility */}
+        <nav className="hidden xl:flex items-center gap-1.5 bg-[#062414]/40 p-2 rounded-2xl border border-[#0f4425]/50 shadow-inner">
+          {[
+            { id: 'schedule', label: dict.nav.schedule },
+            { id: 'members', label: dict.nav.members, count: pendingCount },
+            { id: 'attendance', label: dict.nav.attendance },
+            { id: 'support', label: dict.nav.support },
+            { id: 'admins', label: dict.nav.admins },
+            { id: 'analytics', label: dict.nav.analytics },
+          ].map((nav) => (
+            <button
+              key={nav.id}
+              onClick={() => setActiveTab(nav.id)}
+              className={`px-6 py-3 rounded-xl text-sm font-black whitespace-nowrap shrink-0 transition-all duration-200 flex items-center gap-2.5 ${
+                activeTab === nav.id 
+                  ? 'bg-amber-500 text-slate-950 shadow-xl shadow-amber-500/30 translate-y-[-1px]' 
+                  : 'text-emerald-100/70 hover:text-white hover:bg-emerald-900/40'
+              }`}
+            >
+              <span>{nav.label}</span>
+              {nav.count && nav.count > 0 && (
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                  activeTab === nav.id ? 'bg-slate-950 text-amber-500' : 'bg-rose-500 text-white animate-pulse'
+                }`}>
+                  {nav.count}
+                </span>
+              )}
+            </button>
+          ))}
         </nav>
 
         {/* Zone 3: Profile Badge, Language & Logout */}
-        <div className="flex items-center gap-2.5 shrink-0">
-          {/* Logged-in Super Admin Badge */}
-          <div className="flex items-center gap-1.5 bg-[#062414] border border-emerald-700/60 rounded-xl px-3 py-1.5 text-xs text-slate-200">
-            <span>👑</span>
-            <span className="font-bold">{currentAdmin.nameAm || 'ዘውድነህ'}</span>
-            <span className="text-[10px] bg-amber-500 text-slate-950 font-extrabold px-1.5 py-0.2 rounded">Super Admin</span>
+        <div className="flex items-center gap-4 shrink-0">
+          <div className="hidden sm:flex items-center gap-3 bg-[#062414] border border-[#0f4425] rounded-2xl px-6 py-3 shadow-md group">
+            <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center text-xl border border-amber-500/20 group-hover:scale-110 transition-transform">👑</div>
+            <div className="flex flex-col">
+              <span className="font-black text-sm text-white">{currentAdmin.nameAm || 'አስተዳዳሪ'}</span>
+              <span className="text-[10px] text-amber-500 font-black uppercase tracking-tighter">Super Admin</span>
+            </div>
           </div>
 
-          {/* Broadcast Notification Button */}
-          <button
-            onClick={() => setIsNotificationModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            title="አጠቃላይ ማስታወቂያ ላክ / Broadcast Notification"
-          >
-            <Megaphone className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden sm:inline">ማስታወቂያ ላክ</span>
-          </button>
-
-          <button
-            onClick={() => setLang(lang === 'am' ? 'en' : 'am')}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#062414] hover:bg-emerald-950 text-slate-200 border border-emerald-700/60 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            title="ቋንቋ ይቀይሩ / Switch Language"
-          >
-            <Globe className="w-3.5 h-3.5 text-amber-400" />
-            <span>{lang === 'am' ? 'English' : 'አማርኛ'}</span>
-          </button>
-
-          {/* Real Logout Button */}
-          <button
-            onClick={() => setIsLoggedIn(false)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 transition-colors cursor-pointer shrink-0"
-            title="ከሲስተሙ ውጣ / Log Out"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>{lang === 'am' ? 'ውጣ' : 'Logout'}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsNotificationModalOpen(true)}
+              className="p-3.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition-all shadow-sm hover:scale-105 active:scale-95"
+              title="ማስታወቂያ ላክ"
+            >
+              <Megaphone className="w-6 h-6" />
+            </button>
+            <button
+              onClick={() => setLang(lang === 'am' ? 'en' : 'am')}
+              className="p-3.5 rounded-2xl bg-[#062414] hover:bg-emerald-900/40 text-slate-200 border border-[#0f4425] transition-all shadow-sm hover:scale-105 active:scale-95"
+              title="Switch Language"
+            >
+              <Globe className="w-6 h-6 text-amber-400" />
+            </button>
+            <button
+              onClick={() => setIsLoggedIn(false)}
+              className="p-3.5 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-all shadow-sm hover:scale-105 active:scale-95"
+              title="Log Out"
+            >
+              <LogOut className="w-6 h-6" />
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Mobile Nav Bar for smaller viewports */}
-      <div className="no-print lg:hidden border-b border-[#0f4425] bg-[#09351c]/90 px-4 py-2 flex items-center justify-between gap-1 overflow-x-auto">
+      {/* Mobile Nav Bar - Redesigned for better UX and higher visual weight */}
+      <div className="no-print lg:hidden border-b border-[#0f4425] bg-[#09351c]/95 px-4 py-5 grid grid-cols-3 gap-3 sticky top-[94px] z-40 backdrop-blur-md shadow-lg">
         {[
-          { id: 'schedule', label: lang === 'am' ? '🗓️ መርሐ ግብር' : 'Schedule', icon: Calendar },
-          { id: 'members', label: lang === 'am' ? '👤 የተማሪዎች መዝገብ' : 'Members', icon: Users },
-          { id: 'attendance', label: lang === 'am' ? '📊 የመገኘት መመዝገቢያ' : 'Attendance', icon: QrCode },
-          { id: 'support', label: lang === 'am' ? '💬 ድጋፍና አገልግሎት' : 'Support', icon: HeartHandshake },
-          { id: 'admins', label: lang === 'am' ? '🔐 አድሚኖች' : 'Admins', icon: ShieldCheck },
-          { id: 'analytics', label: lang === 'am' ? '📈 ሪፖርት' : 'Analytics', icon: BarChart3 },
+          { id: 'schedule', label: 'መርሐ ግብር', icon: Calendar },
+          { id: 'members', label: 'ተማሪዎች', icon: Users, count: pendingCount },
+          { id: 'attendance', label: 'መገኘት', icon: QrCode },
+          { id: 'support', label: 'ድጋፍ', icon: HeartHandshake },
+          { id: 'admins', label: 'አድሚኖች', icon: ShieldCheck },
+          { id: 'analytics', label: 'ሪፖርት', icon: BarChart3 },
         ].map((tab) => {
           const Icon = tab.icon;
           return (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as typeof activeTab)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors ${
+              className={`relative flex flex-col items-center justify-center gap-2 p-4 rounded-[1.5rem] transition-all duration-300 ${
                 activeTab === tab.id
-                  ? 'bg-amber-500 text-slate-950 font-bold'
-                  : 'text-emerald-200/80 hover:text-white'
+                  ? 'bg-amber-500 text-slate-950 shadow-2xl shadow-amber-500/40 ring-2 ring-amber-400 scale-95'
+                  : 'bg-[#062414]/80 text-emerald-100/70 border border-[#0f4425] hover:bg-emerald-900/40'
               }`}
             >
-              <Icon className="w-3.5 h-3.5" />
-              <span>{tab.label}</span>
+              <Icon className={`w-6 h-6 ${activeTab === tab.id ? 'text-slate-950' : 'text-amber-400'}`} />
+              <span className="text-[11px] font-black tracking-tight">{tab.label}</span>
+              {tab.count && tab.count > 0 && activeTab !== tab.id && (
+                <span className="absolute -top-1 -right-1 bg-rose-500 text-white font-black px-2 py-0.5 rounded-full text-[10px] border-2 border-[#09351c] animate-pulse">
+                  {tab.count}
+                </span>
+              )}
             </button>
           );
         })}
