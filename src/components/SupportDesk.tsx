@@ -73,6 +73,7 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<Priority>('medium');
   const [isConfidential, setIsConfidential] = useState(false);
+  const [actionNotice, setActionNotice] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const dict = t[lang];
 
@@ -130,11 +131,24 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
     setIsConfidential(false);
   };
 
+  const handleDeleteTicketDirect = (ticketId: string) => {
+    onDeleteTicket(ticketId);
+    if (selectedTicket?.id === ticketId) {
+      setSelectedTicket(null);
+    }
+    setActionNotice({
+      message: 'የድጋፍ ጥያቄው በተሳካ ሁኔታ ተሰርዟል! (Ticket deleted successfully)',
+      type: 'success',
+    });
+    setTimeout(() => setActionNotice(null), 4000);
+  };
+
   const handleSendNote = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTicket || !newNoteText.trim()) return;
 
-    onAddNote(selectedTicket.id, 'አስተባባሪ (Pastoral Team)', newNoteText.trim());
+    const noteContent = newNoteText.trim();
+    onAddNote(selectedTicket.id, 'አስተባባሪ (Pastoral Team)', noteContent);
     setSelectedTicket((prev) =>
       prev
         ? {
@@ -144,7 +158,7 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
               {
                 id: `n-${Date.now()}`,
                 author: 'አስተባባሪ (Pastoral Team)',
-                text: newNoteText.trim(),
+                text: noteContent,
                 date: new Date().toISOString().replace('T', ' ').slice(0, 16),
               },
             ],
@@ -152,6 +166,11 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
         : null
     );
     setNewNoteText('');
+    setActionNotice({
+      message: `ምላሹ ለጠያቂው (${selectedTicket.requesterName}) በቀጥታ ተልኳል! (Direct reply sent to requester)`,
+      type: 'success',
+    });
+    setTimeout(() => setActionNotice(null), 5000);
   };
 
   const handleStatusChange = (newStatus: SupportStatus) => {
@@ -272,6 +291,28 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
         </button>
       </div>
 
+      {/* Action Notification Banner */}
+      {actionNotice && (
+        <div
+          className={`p-3.5 rounded-2xl border text-xs font-semibold flex items-center justify-between gap-2 shadow-lg animate-in fade-in slide-in-from-top-2 ${
+            actionNotice.type === 'success'
+              ? 'bg-emerald-950/90 border-emerald-500/50 text-emerald-200'
+              : 'bg-rose-950/90 border-rose-500/50 text-rose-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{actionNotice.message}</span>
+          </div>
+          <button
+            onClick={() => setActionNotice(null)}
+            className="text-emerald-400 hover:text-white p-0.5 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Primary View: Smart Interactive List */}
       {activeView === 'tickets' && (
         <div className="space-y-4">
@@ -352,12 +393,10 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (confirm('ይህንን የድጋፍ ጥያቄ በእርግጥ መሰረዝ ይፈልጋሉ?')) {
-                              onDeleteTicket(ticket.id);
-                            }
+                            handleDeleteTicketDirect(ticket.id);
                           }}
                           className="p-1 rounded-lg text-emerald-200/60 hover:text-rose-400 hover:bg-rose-950/60 transition-colors cursor-pointer"
-                          title="ጥያቄውን ሰርዝ"
+                          title="ጥያቄውን ሰርዝ (Delete)"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -549,13 +588,17 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
                     )}
                   </div>
                   <button
+                    type="button"
                     onClick={() => {
-                      if (confirm('ይህንን የፈቃድ ጥያቄ መሰረዝ ይፈልጋሉ?')) {
-                        onDeleteLeaveRequest(l.id);
-                      }
+                      onDeleteLeaveRequest(l.id);
+                      setActionNotice({
+                        message: 'የፈቃድ ጥያቄው ተሰርዟል! (Leave request deleted)',
+                        type: 'success',
+                      });
+                      setTimeout(() => setActionNotice(null), 3000);
                     }}
                     className="p-2 rounded-xl text-rose-400 hover:bg-rose-950/60 transition-colors cursor-pointer shrink-0"
-                    title="ሰርዝ"
+                    title="ሰርዝ (Delete)"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -632,14 +675,10 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
                 {getStatusBadge(selectedTicket.status)}
               </div>
               <button
-                onClick={() => {
-                  if (confirm('ይህንን የድጋፍ ጥያቄ መሰረዝ ይፈልጋሉ?')) {
-                    onDeleteTicket(selectedTicket.id);
-                    setSelectedTicket(null);
-                  }
-                }}
-                className="p-1 rounded-lg text-rose-400 hover:text-white hover:bg-rose-950/60 transition-colors mr-2"
-                title="ጥያቄውን ሰርዝ"
+                type="button"
+                onClick={() => handleDeleteTicketDirect(selectedTicket.id)}
+                className="p-1 rounded-lg text-rose-400 hover:text-white hover:bg-rose-950/60 transition-colors mr-2 cursor-pointer"
+                title="ጥያቄውን ሰርዝ (Delete)"
               >
                 <Trash2 className="w-4 h-4" />
               </button>

@@ -140,3 +140,34 @@ export function formatEthiopianDate(dateInput?: Date | string): string {
     return 'ጥቅምት 12 ቀን 2017 ዓ.ም';
   }
 }
+
+/**
+ * Returns Ethiopian time string. 
+ * In Ethiopia, the clock starts at 6:00 AM (Gregorian) which is 12:00 (Ethiopian).
+ */
+export function formatEthiopianTime(dateInput?: Date | string): string {
+  const date = dateInput
+    ? (typeof dateInput === 'string' ? new Date(dateInput) : dateInput)
+    : new Date();
+
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  const seconds = date.getSeconds();
+
+  // Ethiopian time is 6 hours behind Gregorian for the cycle
+  // 6:00 AM -> 12:00 (Day)
+  // 7:00 AM -> 01:00 (Day)
+  // ...
+  // 6:00 PM -> 12:00 (Night)
+  // 7:00 PM -> 01:00 (Night)
+  
+  let ethHours = (hours >= 6) ? hours - 6 : hours + 18;
+  const isNight = ethHours >= 12;
+  if (ethHours > 12) ethHours -= 12;
+  if (ethHours === 0) ethHours = 12;
+
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const period = isNight ? 'ከምሽቱ' : 'ከቀኑ';
+  
+  return `${period} ${ethHours}:${pad(minutes)}:${pad(seconds)}`;
+}

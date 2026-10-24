@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { AdminUser, SundaySchoolDepartment, Language, UserRole } from '../types';
 import { t } from '../utils/translations';
 import { AVATAR_MALE } from '../data/initialData';
+import { db } from '../firebase';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDocs } from 'firebase/firestore';
 import {
   ShieldCheck,
   UserPlus,
@@ -17,7 +19,9 @@ import {
   Lock,
   UserCheck,
   UserX,
+  KeyRound,
 } from 'lucide-react';
+import { ChangePasswordModal } from './ChangePasswordModal';
 
 export interface AdminPermission {
   approveStudents: boolean;
@@ -40,72 +44,57 @@ interface AdminManagementProps {
   lang: Language;
 }
 
+const DEFAULT_SUPER_ADMINS: DetailedAdmin[] = [
+  {
+    id: 'admin-zewdneh',
+    nameAm: 'ዘውድነህ',
+    nameEn: 'Zewdneh',
+    role: 'super_admin',
+    department: 'education',
+    phone: '0988286610',
+    telegramId: '606572754',
+    customRoleTitle: 'ዋና አስተዳዳሪ (Super Admin)',
+    password: '6610Zewd',
+    status: 'active',
+    avatarUrl: AVATAR_MALE,
+    permissions: {
+      approveStudents: true,
+      takeAttendance: true,
+      manageSupport: true,
+      exportReports: true,
+    },
+  },
+  {
+    id: 'admin-kidusyared',
+    nameAm: 'ቅዱስ ያሬድ',
+    nameEn: 'Kidusyared',
+    role: 'super_admin',
+    department: 'education',
+    phone: '0927209931',
+    telegramId: '549201832',
+    customRoleTitle: 'ዋና አስተዳዳሪ (Super Admin)',
+    password: 'kidu9931',
+    status: 'active',
+    avatarUrl: AVATAR_MALE,
+    permissions: {
+      approveStudents: true,
+      takeAttendance: true,
+      manageSupport: true,
+      exportReports: true,
+    },
+  },
+];
+
 export const AdminManagement: React.FC<AdminManagementProps> = ({
   currentAdmin,
   lang,
 }) => {
-  const [adminsList, setAdminsList] = useState<DetailedAdmin[]>(() => {
-    const saved = localStorage.getItem('ww_custom_admins');
-    const defaultSuperAdmins: DetailedAdmin[] = [
-      {
-        id: 'admin-zewdneh',
-        nameAm: 'ዘውድነህ',
-        nameEn: 'Zewdneh',
-        role: 'super_admin',
-        department: 'education',
-        phone: '0988286610',
-        telegramId: '606572754',
-        customRoleTitle: 'ዋና አስተዳዳሪ (Super Admin)',
-        password: 'admin123password',
-        status: 'active',
-        avatarUrl: AVATAR_MALE,
-        permissions: {
-          approveStudents: true,
-          takeAttendance: true,
-          manageSupport: true,
-          exportReports: true,
-        },
-      },
-      {
-        id: 'admin-kidusyared',
-        nameAm: 'ቅዱስ ያሬድ',
-        nameEn: 'Kidusyared',
-        role: 'super_admin',
-        department: 'education',
-        phone: '0927209931',
-        telegramId: '549201832',
-        customRoleTitle: 'ዋና አስተዳዳሪ (Super Admin)',
-        password: 'admin123password',
-        status: 'active',
-        avatarUrl: AVATAR_MALE,
-        permissions: {
-          approveStudents: true,
-          takeAttendance: true,
-          manageSupport: true,
-          exportReports: true,
-        },
-      },
-    ];
-
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((a: any): DetailedAdmin => ({
-            ...a,
-            status: (a.status === 'suspended' ? 'suspended' : 'active') as 'active' | 'suspended',
-            role: (a.role === 'super_admin' ? 'super_admin' : 'admin') as UserRole,
-          }));
-        }
-      } catch {
-        // fallback
-      }
-    }
-    return defaultSuperAdmins;
-  });
-
+  const [adminsList, setAdminsList] = useState<DetailedAdmin[]>(DEFAULT_SUPER_ADMINS);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingAdmin, setEditingAdmin] = useState<DetailedAdmin | null>(null);
+  const [actionNotice, setActionNotice] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [selectedAdminForPassword, setSelectedAdminForPassword] = useState<DetailedAdmin | null>(null);
 
   // New admin form state
   const [newAdminName, setNewAdminName] = useState('');
@@ -120,6 +109,66 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
   const [permSupport, setPermSupport] = useState(true);
   const [permReports, setPermReports] = useState(false);
 
+  // Real-time Firestore synchronization for administrators
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, 'admins'),
+      async (snap) => {
+        if (snap.empty) {
+          // Seed initial super admins into Firestore database
+          for (const sAdmin of DEFAULT_SUPER_ADMINS) {
+            await setDoc(doc(db, 'admins', sAdmin.id), sAdmin, { merge: true }).catch(console.error);
+          }
+          setAdminsList(DEFAULT_SUPER_ADMINS);
+          return;
+        }
+
+        const loaded: DetailedAdmin[] = snap.docs.map((docSnap) => {
+          const d = docSnap.data();
+          return {
+            id: docSnap.id,
+            nameAm: d.nameAm || '',
+            nameEn: d.nameEn || d.nameAm || '',
+            role: (d.role === 'super_admin' ? 'super_admin' : 'admin') as UserRole,
+            department: (d.department || 'education') as SundaySchoolDepartment,
+            phone: d.phone || '',
+            telegramId: d.telegramId || '',
+            customRoleTitle: d.customRoleTitle || '',
+            password: d.password || '',
+            status: (d.status === 'suspended' ? 'suspended' : 'active') as 'active' | 'suspended',
+            avatarUrl: d.avatarUrl || AVATAR_MALE,
+            permissions: d.permissions || {
+              approveStudents: d.role === 'super_admin',
+              takeAttendance: true,
+              manageSupport: true,
+              exportReports: d.role === 'super_admin',
+            },
+          };
+        });
+
+        // Ensure default super admins exist in the list and have password set
+        for (const defAdmin of DEFAULT_SUPER_ADMINS) {
+          const existingAdmin = loaded.find((a) => a.phone === defAdmin.phone || a.id === defAdmin.id);
+          if (!existingAdmin) {
+            await setDoc(doc(db, 'admins', defAdmin.id), defAdmin, { merge: true }).catch(console.error);
+            loaded.push(defAdmin);
+          } else if (!existingAdmin.password) {
+            existingAdmin.password = defAdmin.password;
+            await setDoc(doc(db, 'admins', existingAdmin.id), { password: defAdmin.password }, { merge: true }).catch(console.error);
+          }
+        }
+
+        setAdminsList(loaded);
+        localStorage.setItem('ww_custom_admins', JSON.stringify(loaded));
+      },
+      (error) => {
+        console.error('Firestore admins snapshot error:', error);
+      }
+    );
+
+    return () => unsub();
+  }, []);
+
   const dict = t[lang];
   const isMasterSuper = currentAdmin.nameAm === 'ዘውድነህ' || currentAdmin.nameAm === 'ቅዱስ ያሬድ';
   const isSuperAdmin = currentAdmin.role === 'super_admin';
@@ -129,20 +178,24 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
     return adm.role !== 'super_admin';
   });
 
-  const handleCreateAdmin = (e: React.FormEvent) => {
+  const handleCreateAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAdminName.trim() || !newAdminPhone.trim() || !newAdminPassword.trim()) return;
 
-    const assignedRole: UserRole = isMasterSuper ? newAdminRole : 'admin';
+    const cleanPhone = newAdminPhone.trim();
+    const phoneDigits = cleanPhone.replace(/\D/g, '').slice(-9);
+    const assignedRole: UserRole = isSuperAdmin ? newAdminRole : 'admin';
+    const newDocId = `admin-${phoneDigits || Date.now()}`;
+    const newDocRef = doc(db, 'admins', newDocId);
 
     const newAdmin: DetailedAdmin = {
-      id: `admin-${Date.now()}`,
+      id: newDocId,
       nameAm: newAdminName.trim(),
       nameEn: newAdminName.trim(),
       role: assignedRole,
       department: newAdminDept,
       customRoleTitle: customRoleTitle.trim() || (assignedRole === 'super_admin' ? 'ዋና አስተዳዳሪ (Super Admin)' : 'የክፍል አስተባባሪ'),
-      phone: newAdminPhone.trim(),
+      phone: cleanPhone,
       password: newAdminPassword.trim(),
       status: 'active',
       telegramId: newAdminTelegramId.trim() || `${Math.floor(100000000 + Math.random() * 900000000)}`,
@@ -155,64 +208,123 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
       },
     };
 
-    const updated = [...adminsList, newAdmin];
-    setAdminsList(updated);
-    localStorage.setItem('ww_custom_admins', JSON.stringify(updated));
-    setIsAddModalOpen(false);
+    try {
+      // Direct Firestore write
+      await setDoc(newDocRef, newAdmin);
 
-    // Reset form
-    setNewAdminName('');
-    setNewAdminPhone('');
-    setNewAdminPassword('');
-    setNewAdminRole('admin');
-    setNewAdminTelegramId('');
-    setCustomRoleTitle('የትምህርት ክፍል አስተባባሪ');
+      // Optimistically add to state for instant visibility on the page
+      setAdminsList((prev) => {
+        const without = prev.filter((a) => a.id !== newAdmin.id && a.phone !== newAdmin.phone);
+        const updated = [...without, newAdmin];
+        try {
+          localStorage.setItem('ww_custom_admins', JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+
+      setActionNotice({
+        message: `አስተዳዳሪ "${newAdmin.nameAm}" በትክክለኛ የይለፍ ቃል በተሳካ ሁኔታ ተመዝግቧል! (Admin saved successfully)`,
+        type: 'success',
+      });
+      setTimeout(() => setActionNotice(null), 5000);
+      setIsAddModalOpen(false);
+
+      // Reset form
+      setNewAdminName('');
+      setNewAdminPhone('');
+      setNewAdminPassword('');
+      setNewAdminRole('admin');
+      setNewAdminTelegramId('');
+      setCustomRoleTitle('የትምህርት ክፍል አስተባባሪ');
+    } catch (err: any) {
+      console.error('Failed to create admin:', err);
+      setActionNotice({
+        message: 'አስተዳዳሪውን ማስቀመጥ አልተቻለም። እባክዎ እንደገና ይሞክሩ።',
+        type: 'error',
+      });
+      setTimeout(() => setActionNotice(null), 5000);
+    }
   };
 
-  const handleUpdateAdminProfile = (e: React.FormEvent) => {
+  const handleUpdateAdminProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingAdmin) return;
 
-    const updated = adminsList.map((adm) => (adm.id === editingAdmin.id ? editingAdmin : adm));
-    setAdminsList(updated);
-    localStorage.setItem('ww_custom_admins', JSON.stringify(updated));
-    setEditingAdmin(null);
+    try {
+      await setDoc(doc(db, 'admins', editingAdmin.id), editingAdmin, { merge: true });
+
+      setAdminsList((prev) =>
+        prev.map((adm) => (adm.id === editingAdmin.id ? editingAdmin : adm))
+      );
+
+      setActionNotice({
+        message: `የ"${editingAdmin.nameAm}" መረጃና የይለፍ ቃል በተሳካ ሁኔታ ተስተካክሏል!`,
+        type: 'success',
+      });
+      setTimeout(() => setActionNotice(null), 5000);
+      setEditingAdmin(null);
+    } catch (err: any) {
+      console.error('Failed to update admin:', err);
+      setActionNotice({
+        message: 'የአስተዳዳሪውን መረጃ ማስተካከል አልተሳካም።',
+        type: 'error',
+      });
+      setTimeout(() => setActionNotice(null), 5000);
+    }
   };
 
-  const handleTogglePermission = (adminId: string, permKey: keyof AdminPermission) => {
-    const updated = adminsList.map((adm) => {
-      if (adm.id === adminId && adm.role !== 'super_admin') {
-        return {
-          ...adm,
-          permissions: {
-            ...adm.permissions,
-            [permKey]: !adm.permissions[permKey],
-          },
-        };
+  const handleTogglePermission = async (adminId: string, permKey: keyof AdminPermission) => {
+    const target = adminsList.find((a) => a.id === adminId);
+    if (!target || target.role === 'super_admin') return;
+
+    const newPerms = {
+      ...target.permissions,
+      [permKey]: !target.permissions[permKey],
+    };
+
+    setAdminsList((prev) =>
+      prev.map((a) => (a.id === adminId ? { ...a, permissions: newPerms } : a))
+    );
+
+    try {
+      await updateDoc(doc(db, 'admins', adminId), { permissions: newPerms });
+    } catch (err) {
+      console.error('Failed to toggle permission:', err);
+    }
+  };
+
+  const handleToggleStatus = async (adminId: string) => {
+    const target = adminsList.find((a) => a.id === adminId);
+    if (!target || target.role === 'super_admin') return;
+
+    const nextStatus = target.status === 'suspended' ? 'active' : 'suspended';
+    setAdminsList((prev) =>
+      prev.map((a) => (a.id === adminId ? { ...a, status: nextStatus } : a))
+    );
+
+    try {
+      await updateDoc(doc(db, 'admins', adminId), { status: nextStatus });
+    } catch (err) {
+      console.error('Failed to toggle status:', err);
+    }
+  };
+
+  const handleDeleteAdmin = async (adminId: string) => {
+    const target = adminsList.find((a) => a.id === adminId);
+    if (!target) return;
+
+    if (confirm(`"${target.nameAm}" የተባሉትን አገልጋይ ከሲስተሙ ሙሉ በሙሉ መሰረዝ ይፈልጋሉ?`)) {
+      setAdminsList((prev) => prev.filter((a) => a.id !== adminId));
+      try {
+        await deleteDoc(doc(db, 'admins', adminId));
+        setActionNotice({
+          message: `አስተዳዳሪው ከሲስተሙ ተሰርዟል።`,
+          type: 'success',
+        });
+        setTimeout(() => setActionNotice(null), 3000);
+      } catch (err) {
+        console.error('Failed to delete admin:', err);
       }
-      return adm;
-    });
-    setAdminsList(updated);
-    localStorage.setItem('ww_custom_admins', JSON.stringify(updated));
-  };
-
-  const handleToggleStatus = (adminId: string) => {
-    const updated = adminsList.map((adm) => {
-      if (adm.id === adminId && adm.role !== 'super_admin') {
-        const nextStatus: 'active' | 'suspended' = adm.status === 'suspended' ? 'active' : 'suspended';
-        return { ...adm, status: nextStatus };
-      }
-      return adm;
-    });
-    setAdminsList(updated);
-    localStorage.setItem('ww_custom_admins', JSON.stringify(updated));
-  };
-
-  const handleDeleteAdmin = (adminId: string) => {
-    if (confirm('ይህን አገልጋይ / አስተዳዳሪ ከሲስተሙ መሰረዝ ይፈልጋሉ?')) {
-      const filtered = adminsList.filter((adm) => adm.id !== adminId);
-      setAdminsList(filtered);
-      localStorage.setItem('ww_custom_admins', JSON.stringify(filtered));
     }
   };
 
@@ -234,21 +346,56 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
         <div>
           <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             <ShieldCheck className="w-6 h-6 text-amber-400" />
-            <span>የአስተዳዳሪዎች ማኔጅመንት እና ፈቃድ መስጫ (Admin Management)</span>
+            <span>የአስተዳዳሪዎች ማኔጅመንት እና ፈቃድ መስጫ ({visibleAdmins.length})</span>
           </h2>
           <p className="text-sm text-emerald-200/70 mt-1">
             የሰንበት ትምህርት ቤቱን አገልጋዮች መመደብ፣ ሚና መስጠት (Admin / Super Admin)፣ የይለፍ ቃል ማስተካከል እና የሲስተም ፈቃዶች
           </p>
         </div>
 
-        <button
-          onClick={() => setIsAddModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 transition-all cursor-pointer shrink-0"
-        >
-          <UserPlus className="w-4 h-4" />
-          <span>አዲስ አስተዳዳሪ ጨምር</span>
-        </button>
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => {
+              setSelectedAdminForPassword(null);
+              setIsPasswordModalOpen(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-xs shadow-lg transition-all cursor-pointer shrink-0"
+          >
+            <KeyRound className="w-4 h-4" />
+            <span>የይለፍ ቃል ቀይር (Change Password)</span>
+          </button>
+
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 transition-all cursor-pointer shrink-0"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>አዲስ አስተዳዳሪ ጨምር</span>
+          </button>
+        </div>
       </div>
+
+      {/* Action Notice */}
+      {actionNotice && (
+        <div
+          className={`p-3.5 rounded-2xl flex items-center justify-between gap-3 text-xs border animate-in fade-in slide-in-from-top-1 ${
+            actionNotice.type === 'success'
+              ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-200'
+              : 'bg-rose-950/80 border-rose-500/50 text-rose-200'
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            <ShieldCheck className="w-4 h-4 shrink-0 text-amber-400" />
+            <span className="font-medium">{actionNotice.message}</span>
+          </div>
+          <button
+            onClick={() => setActionNotice(null)}
+            className="text-white/60 hover:text-white p-1 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Admins Table */}
       <div className="bg-[#09351c]/90 backdrop-blur-md border border-[#0f4425] rounded-3xl shadow-xl overflow-hidden">
@@ -295,10 +442,21 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                     </td>
 
                     <td className="py-3 px-4">
-                      <div className="font-mono text-emerald-200">{adm.phone}</div>
-                      <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                        <Lock className="w-3 h-3 text-amber-400" />
-                        <span>{adm.password ? '••••••••' : 'ምንም የለም'}</span>
+                      <div className="font-mono text-emerald-200 font-bold">{adm.phone}</div>
+                      <div className="text-[11px] text-slate-300 flex items-center gap-1.5 mt-0.5">
+                        <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span className="font-mono tracking-widest text-slate-400">••••••••</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedAdminForPassword(adm);
+                            setIsPasswordModalOpen(true);
+                          }}
+                          className="text-amber-400/80 hover:text-amber-300 p-0.5 transition-colors cursor-pointer ml-1"
+                          title="የይለፍ ቃል ቀይር (Change password)"
+                        >
+                          <KeyRound className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </td>
 
@@ -373,41 +531,62 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                     </td>
 
                     <td className="py-3 px-4 text-right">
-                      {!isSuper && (
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => handleToggleStatus(adm.id)}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer ${
-                              isSuspended
-                                ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40'
-                                : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40'
-                            }`}
-                            title={isSuspended ? 'አንቃ (Activate)' : 'አግድ (Suspend)'}
-                          >
-                            {isSuspended ? 'አንቃ' : 'አግድ'}
-                          </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => {
+                            setSelectedAdminForPassword(adm);
+                            setIsPasswordModalOpen(true);
+                          }}
+                          className="p-1.5 rounded-lg text-amber-400 hover:bg-amber-950/60 transition-colors cursor-pointer"
+                          title="የይለፍ ቃል ቀይር (Change Password)"
+                        >
+                          <KeyRound className="w-4 h-4" />
+                        </button>
 
-                          <button
-                            onClick={() => setEditingAdmin(adm)}
-                            className="p-1.5 rounded-lg text-sky-400 hover:bg-sky-950/60 transition-colors cursor-pointer"
-                            title="መረጃ አስተካክል (Edit)"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
+                        {!isSuper && (
+                          <>
+                            <button
+                              onClick={() => handleToggleStatus(adm.id)}
+                              className={`px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors cursor-pointer ${
+                                isSuspended
+                                  ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40'
+                                  : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40'
+                              }`}
+                              title={isSuspended ? 'አንቃ (Activate)' : 'አግድ (Suspend)'}
+                            >
+                              {isSuspended ? 'አንቃ' : 'አግድ'}
+                            </button>
 
-                          <button
-                            onClick={() => handleDeleteAdmin(adm.id)}
-                            className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-950/60 transition-colors cursor-pointer"
-                            title="አስተዳዳሪውን ሰርዝ (Delete)"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )}
+                            <button
+                              onClick={() => setEditingAdmin(adm)}
+                              className="p-1.5 rounded-lg text-sky-400 hover:bg-sky-950/60 transition-colors cursor-pointer"
+                              title="መረጃ አስተካክል (Edit)"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+
+                            <button
+                              onClick={() => handleDeleteAdmin(adm.id)}
+                              className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-950/60 transition-colors cursor-pointer"
+                              title="አስተዳዳሪውን ሰርዝ (Delete)"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
               })}
+              {visibleAdmins.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                    <p className="text-sm font-semibold">ምንም የተመዘገበ አድሚን አልተገኘም።</p>
+                    <p className="text-xs text-slate-500 mt-1">አዲስ አድሚን ለመመዝገብ ከላይ "አዲስ አስተዳዳሪ ጨምር" የሚለውን ይጫኑ።</p>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -734,6 +913,34 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
           </div>
         </div>
       )}
+
+      {/* Change Password Modal */}
+      <ChangePasswordModal
+        isOpen={isPasswordModalOpen}
+        onClose={() => {
+          setIsPasswordModalOpen(false);
+          setSelectedAdminForPassword(null);
+        }}
+        currentAdmin={currentAdmin}
+        targetAdmin={selectedAdminForPassword}
+        onPasswordChanged={(adminId, newPass) => {
+          const selectedPhone = selectedAdminForPassword?.phone?.replace(/\D/g, '').slice(-9);
+          setAdminsList((prev) =>
+            prev.map((a) => {
+              const aPhone = (a.phone || '').replace(/\D/g, '').slice(-9);
+              if (a.id === adminId || (selectedPhone && aPhone === selectedPhone)) {
+                return { ...a, password: newPass };
+              }
+              return a;
+            })
+          );
+          setActionNotice({
+            message: 'የይለፍ ቃል በተሳካ ሁኔታ ተቀይሯል! (Password updated successfully)',
+            type: 'success',
+          });
+          setTimeout(() => setActionNotice(null), 5000);
+        }}
+      />
     </div>
   );
 };

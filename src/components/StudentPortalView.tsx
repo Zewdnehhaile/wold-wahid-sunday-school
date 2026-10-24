@@ -104,13 +104,18 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
         christianName: regChristianName.trim(),
         gender: regGender,
         birthDate: regBirthDate.trim(),
+        birthYear: regBirthDate.trim(), // dashboard compatibility
         phone: cleanPhone || regPhone.trim(),
         address: regAddress.trim(),
+        subcity: regAddress.trim(), // dashboard compatibility
         emergencyContact: {
           name: regEmergencyName.trim(),
           phone: cleanEmergPhone || regEmergencyPhone.trim(),
           relation: 'ቤተሰብ / Family'
         },
+        emergencyName: regEmergencyName.trim(), // bot compatibility
+        emergencyPhone: cleanEmergPhone || regEmergencyPhone.trim(), // bot compatibility
+        emergencyRelation: 'ቤተሰብ / Family', // bot compatibility
         department: regDepartment,
         photoUrl: regPhotoUrl.trim() || '',
         status: 'pending',

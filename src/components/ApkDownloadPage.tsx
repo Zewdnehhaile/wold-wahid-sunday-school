@@ -72,12 +72,18 @@ export const ApkDownloadPage: React.FC<ApkDownloadPageProps> = ({ onOpenApp }) =
   };
 
   return (
-    <div className="min-h-screen bg-[#ff0000] text-slate-100 flex items-center justify-center p-4 relative overflow-hidden font-sans select-none">
-      {/* Background Ambience */}
-      <div className="absolute -top-32 -left-32 w-80 h-80 bg-emerald-700/20 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-32 -right-32 w-80 h-80 bg-amber-600/15 rounded-full blur-3xl pointer-events-none" />
+    <div className="min-h-screen text-slate-100 flex items-center justify-center p-4 relative overflow-hidden font-sans select-none bg-[#062414]">
+      {/* Church Background Image - Visible */}
+      <div className="absolute inset-0 z-0">
+        <img 
+          src="/assets/aistudio/1792237453828_f6473ebe.jfif" 
+          alt="Church Building" 
+          className="w-full h-full object-cover brightness-75"
+        />
+        <div className="absolute inset-0 bg-black/40"></div>
+      </div>
 
-      <div className="w-full max-w-md bg-[#09351c] border-2 border-[#b45309]/50 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-emerald-950/80 relative z-10 backdrop-blur-md text-center space-y-6">
+      <div className="w-full max-w-md bg-[#09351c]/95 border-2 border-[#b45309]/60 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-black/80 relative z-10 backdrop-blur-md text-center space-y-6">
         
         {/* Church Emblem Logo Header */}
         <div className="flex flex-col items-center">
@@ -94,38 +100,22 @@ export const ApkDownloadPage: React.FC<ApkDownloadPageProps> = ({ onOpenApp }) =
           <p className="text-xs text-emerald-200/80 mt-0.5">
             መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን
           </p>
-
-          {/* Coming Soon Mobile App Banner */}
-          <div className="mt-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/40 text-amber-300 text-xs font-semibold">
-            <Clock className="w-3.5 h-3.5" />
-            <span>📱 ሞባይል መተግበሪያ (በቅርቡ ይጠብቁ / Coming Soon)</span>
-          </div>
         </div>
 
-        {/* Coming Soon Notice Box */}
-        <div className="p-4 bg-[#062414]/90 rounded-2xl border border-emerald-900 text-left space-y-2">
-          <div className="flex items-center gap-2 text-xs font-semibold text-amber-400">
-            <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>የአንድሮይድ እና iOS መተግበሪያ በዝግጅት ላይ ነው!</span>
-          </div>
-          <p className="text-[11px] text-emerald-200/80 leading-relaxed">
-            ኦፊሴላዊው የሞባይል አፕሊኬሽን በቅርቡ በ Google Play Store እና App Store የሚለቀቅ ሲሆን፤ በአሁኑ ሰዓት ሙሉውን የሰንበት ት/ቤት ሲስተም በቴሌግራም ሚኒ አፕ እዚሁ በቀጥታ መጠቀም ይችላሉ።
-          </p>
-        </div>
-
-        {/* Primary Access Options: Super Admin/Admin Scanner Login only */}
-        <div className="space-y-3 pt-1">
+        {/* Primary Access Options: Admin Login only */}
+        <div className="space-y-3 pt-4">
           {/* Admin Scanner Login Button */}
           <button
             type="button"
             onClick={() => onOpenApp?.(false)}
-            className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-2xl shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 text-xs sm:text-sm"
+            className="w-full py-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-2xl shadow-xl shadow-amber-500/30 flex items-center justify-center gap-3 cursor-pointer transition transform active:scale-95 text-sm"
           >
-            <Lock className="w-4 h-4" />
+            <Lock className="w-5 h-5" />
             <span>🔐 የአስተዳዳሪና ስካነር መግቢያ (Admin Scanner Login)</span>
           </button>
-          <p className="text-[10px] text-amber-300/80 -mt-1 font-medium">
-            (ለዋና አስተዳዳሪና ለአስተዳዳሪዎች ብቻ የተፈቀደ)
+          
+          <p className="text-[10px] text-amber-300/80 mt-2 font-medium">
+            (ለዋና አስተዳዳሪና ለአስተዳዳሪዎች ብቻ የተፈቀደ - Admin Access)
           </p>
         </div>
 

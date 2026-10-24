@@ -103,6 +103,7 @@ export interface SupportTicket {
   priority: Priority;
   status: SupportStatus;
   assignedTo?: string;
+  telegramId?: string | number;
   createdAt: string;
   updatedAt: string;
   isConfidential: boolean;

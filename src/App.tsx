@@ -22,6 +22,7 @@ import { AdminManagement } from './components/AdminManagement';
 import { LoginPage } from './components/LoginPage';
 import { ApkDownloadPage } from './components/ApkDownloadPage';
 import { NotificationModal } from './components/NotificationModal';
+import { ChangePasswordModal } from './components/ChangePasswordModal';
 import {
   Calendar,
   Users,
@@ -40,11 +41,13 @@ import {
   Bell,
   CheckCircle2,
   X,
+  KeyRound,
 } from 'lucide-react';
 
 export default function App() {
   const [lang, setLang] = useState<Language>('am');
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
+  const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
   const [approvalBanner, setApprovalBanner] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const isTelegramContext = typeof window !== 'undefined' && (
     Boolean((window as any).Telegram?.WebApp?.initData) ||
@@ -58,8 +61,7 @@ export default function App() {
   const [hasEnteredApp, setHasEnteredApp] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState('members');
-  const [isLangModalOpen, setIsLangModalOpen] = useState(false);
-  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [showStudentPortal, setShowStudentPortal] = useState(false);
 
   // Live Firestore state (no mock data)
   const [registrations, setRegistrations] = useState<Member[]>([]);
@@ -101,10 +103,16 @@ export default function App() {
             roleEn: 'Student',
             christianName: d.christianName || '',
             birthYear: d.birthYear || d.birthDate || '',
-            photoUrl: d.photoUrl || (d.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE),
+            photoUrl: (d.photoUrl?.startsWith('tg_file:') 
+            ? `/api/telegram/file/${d.photoUrl.replace('tg_file:', '')}` 
+            : d.photoUrl) || (d.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE),
             registeredDate: d.submittedAt?.split('T')[0] || new Date().toISOString().split('T')[0],
             bloodGroup: d.bloodGroup || 'O+',
-            emergencyContact: d.emergencyContact || { name: '', phone: '', relation: '' },
+            emergencyContact: d.emergencyContact || { 
+              name: d.emergencyName || '', 
+              phone: d.emergencyPhone || '', 
+              relation: d.emergencyRelation || 'ቤተሰብ / Family' 
+            },
             subcity: d.subcity || d.address || '',
             status: isApproved ? 'active' : d.status === 'rejected' ? 'rejected' : 'pending_approval',
             telegramId: d.telegramId || '',
@@ -139,10 +147,16 @@ export default function App() {
           gradeLevel: d.gradeLevel || 'general',
           roleAm: 'ተማሪ / Student',
           roleEn: 'Student',
-          photoUrl: d.photoUrl || (d.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE),
+          photoUrl: (d.photoUrl?.startsWith('tg_file:') 
+            ? `/api/telegram/file/${d.photoUrl.replace('tg_file:', '')}` 
+            : d.photoUrl) || (d.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE),
           registeredDate: d.registeredDate || new Date().toISOString().split('T')[0],
           bloodGroup: d.bloodGroup || 'O+',
-          emergencyContact: d.emergencyContact || { name: '', phone: '', relation: '' },
+          emergencyContact: d.emergencyContact || { 
+            name: d.emergencyName || '', 
+            phone: d.emergencyPhone || '', 
+            relation: d.emergencyRelation || 'ቤተሰብ / Family' 
+          },
           subcity: d.subcity || d.address || '',
           status: isPending ? 'pending_approval' : (d.status === 'rejected' ? 'rejected' : 'active'),
           telegramId: d.telegramId || '',
@@ -192,7 +206,7 @@ export default function App() {
           memberNameAm: d.memberNameAm || d.fullNameAm || 'Student',
           memberNameEn: d.memberNameEn || d.fullNameEn || 'Student',
           memberCode: d.memberCode || d.studentCode || '',
-          department: d.department || 'education',
+          department: d.department || d.departmentResponsible || 'education',
           sessionName: d.sessionName || 'Sunday School Session',
           timestamp: d.timestamp || '',
           date: d.date || '',
@@ -470,6 +484,7 @@ export default function App() {
         fullNameEn: updated.fullNameEn,
         christianName: updated.christianName || '',
         birthYear: updated.birthYear || '',
+        birthDate: updated.birthYear || '', // bot compatibility
         gender: updated.gender,
         phone: updated.phone,
         department: updated.department,
@@ -477,14 +492,18 @@ export default function App() {
         code: updated.code,
         studentCode: updated.code,
         subcity: updated.subcity || '',
-        emergencyContact: updated.emergencyContact || { name: '', phone: '', relation: '' },
+        address: updated.subcity || '', // bot compatibility
+        emergencyContact: updated.emergencyContact,
+        emergencyName: updated.emergencyContact.name, // bot compatibility
+        emergencyPhone: updated.emergencyContact.phone, // bot compatibility
+        emergencyRelation: updated.emergencyContact.relation, // bot compatibility
         photoUrl: updated.photoUrl,
         updatedAt: new Date().toISOString(),
       };
 
-      // Try updating both collections to be safe
-      await updateDoc(studentRef, updateData).catch(() => console.log('Member not in students collection'));
-      await updateDoc(regRef, updateData).catch(() => console.log('Member not in registrations collection'));
+      // Try updating both collections using setDoc with merge for robustness
+      await setDoc(studentRef, updateData, { merge: true }).catch(() => console.log('Member not in students collection'));
+      await setDoc(regRef, updateData, { merge: true }).catch(() => console.log('Member not in registrations collection'));
 
       setApprovalBanner({
         message: 'የተማሪ መረጃ በተሳካ ሁኔታ ተስተካክሏል።',
@@ -493,6 +512,11 @@ export default function App() {
       setTimeout(() => setApprovalBanner(null), 3000);
     } catch (e) {
       console.error('Update member failed:', e);
+      setApprovalBanner({
+        message: 'ማስተካከል አልተሳካም። እባክዎ እንደገና ይሞክሩ።',
+        type: 'error',
+      });
+      setTimeout(() => setApprovalBanner(null), 5000);
     }
   };
 
@@ -580,7 +604,21 @@ export default function App() {
       await updateDoc(doc(db, 'support_tickets', ticketId), {
         notes: updatedNotes,
         updatedAt: new Date().toISOString(),
-      });
+      }).catch(console.error);
+
+      // Targeted notification for requester (broadcast-style direct delivery)
+      await addDoc(collection(db, 'notifications'), {
+        title: `💬 ለድጋፍ ጥያቄዎ (${ticket.ticketNumber || ticketId}) ምላሽ ተሰጥቷል`,
+        message: `ከ${author || 'አስተዳዳሪ'}: "${text}"`,
+        senderName: author || 'አስተባባሪ',
+        targetRequesterName: ticket.requesterName || '',
+        targetPhone: ticket.phone || '',
+        targetTelegramId: ticket.telegramId || '',
+        ticketId: ticketId,
+        ticketNumber: ticket.ticketNumber || ticketId,
+        createdAt: new Date().toISOString(),
+        isDirectReply: true,
+      }).catch(console.error);
 
       await fetch(`/api/support_tickets/${ticketId}/note`, {
         method: 'POST',
@@ -594,8 +632,19 @@ export default function App() {
 
   const handleDeleteTicket = async (ticketId: string) => {
     try {
-      setTickets((prev) => prev.filter((t) => t.id !== ticketId));
-      await deleteDoc(doc(db, 'support_tickets', ticketId));
+      setTickets((prev) => prev.filter((t) => t.id !== ticketId && t.ticketNumber !== ticketId));
+      await deleteDoc(doc(db, 'support_tickets', ticketId)).catch(() => {});
+      
+      // Also delete from Firestore if ticket has different document ID
+      const querySnap = await getDocs(collection(db, 'support_tickets')).catch(() => null);
+      if (querySnap) {
+        for (const d of querySnap.docs) {
+          if (d.id === ticketId || d.data().id === ticketId || d.data().ticketNumber === ticketId) {
+            await deleteDoc(doc(db, 'support_tickets', d.id)).catch(() => {});
+          }
+        }
+      }
+
       await fetch(`/api/support_tickets/${ticketId}`, { method: 'DELETE' }).catch(() => {});
     } catch (e) {
       console.error('Delete ticket failed:', e);
@@ -624,23 +673,28 @@ export default function App() {
     setActiveTab('attendance');
   };
 
-  if (isTelegramContext && !hasEnteredApp) {
+  if (!hasEnteredApp) {
     return (
       <ApkDownloadPage
-        onOpenApp={() => {
+        onOpenApp={(asStudent) => {
+          if (asStudent) {
+            setShowStudentPortal(true);
+          }
           setHasEnteredApp(true);
         }}
       />
     );
   }
 
-  // Show Student Portal if not logged in as admin and in Telegram context
-  if (isTelegramContext && !isLoggedIn && !showAdminLogin) {
+  if (showStudentPortal) {
     return (
       <StudentPortalView
         members={members}
         attendance={attendance}
-        onOpenAdminLogin={() => setShowAdminLogin(true)}
+        onOpenAdminLogin={() => {
+          setShowStudentPortal(false);
+          setIsLoggedIn(false);
+        }}
         lang={lang}
       />
     );
@@ -652,6 +706,7 @@ export default function App() {
         onLogin={(admin) => {
           setCurrentAdmin((prev) => ({
             ...prev,
+            id: admin.id || prev.id,
             nameAm: admin.nameAm,
             nameEn: admin.nameEn,
             phone: admin.phone,
@@ -660,7 +715,7 @@ export default function App() {
           setIsLoggedIn(true);
           setActiveTab('attendance');
         }}
-        onOpenStudentPortal={isTelegramContext ? () => setShowAdminLogin(false) : undefined}
+        onOpenStudentPortal={() => setShowStudentPortal(true)}
       />
     );
   }
@@ -668,7 +723,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#062414] text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
       {/* Top Bar Contract: Zone 1 (Wordmark) - Zone 2 (Nav Links) - Zone 3 (Profile & Logout) */}
-      <header className="no-print border-b border-[#0f4425] bg-[#09351c]/95 backdrop-blur-xl sticky top-0 z-50 px-4 sm:px-8 py-5 flex items-center justify-between gap-8 shadow-2xl shadow-emerald-950/60 transition-all duration-300">
+      <header className="no-print border-b border-[#0f4425] bg-[#09351c]/95 backdrop-blur-xl sticky top-0 z-50 px-4 sm:px-8 py-4 flex items-center justify-between gap-8 shadow-2xl shadow-emerald-950/60 transition-all duration-300">
         {/* Zone 1: Brand Wordmark */}
         <div className="flex items-center gap-4 shrink-0">
           <div className="relative group">
@@ -676,18 +731,18 @@ export default function App() {
             <img
               src={FITHAPOL_LOGO}
               alt="Wold Wahid Logo"
-              className="relative w-14 h-14 rounded-full border-2 border-amber-400 object-cover shadow-lg"
+              className="relative w-12 h-12 rounded-full border-2 border-amber-400 object-cover shadow-lg"
               referrerPolicy="no-referrer"
             />
           </div>
           <a href="#" className="flex flex-col">
-            <span className="text-xl font-black tracking-tight text-white leading-tight uppercase">የወልድ ዋሕድ</span>
-            <span className="text-amber-400 text-[11px] font-black tracking-widest font-sans">ሰንበት ትምህርት ቤት</span>
+            <span className="text-lg font-black tracking-tight text-white leading-tight uppercase">የወልድ ዋሕድ</span>
+            <span className="text-amber-400 text-xs font-bold tracking-widest font-sans">ሰንበት ትምህርት ቤት</span>
           </a>
         </div>
 
-        {/* Zone 2: Concise Single-Line Nav Links - Enhanced for visibility */}
-        <nav className="hidden xl:flex items-center gap-1.5 bg-[#062414]/40 p-2 rounded-2xl border border-[#0f4425]/50 shadow-inner">
+        {/* Zone 2: Concise Single-Line Nav Links - Enhanced for visibility (Fixed Breakpoint Gap) */}
+        <nav className="hidden lg:flex items-center gap-1 bg-[#062414]/40 p-1.5 rounded-2xl border border-[#0f4425]/50 shadow-inner">
           {[
             { id: 'schedule', label: dict.nav.schedule },
             { id: 'members', label: dict.nav.members, count: pendingCount },
@@ -699,10 +754,10 @@ export default function App() {
             <button
               key={nav.id}
               onClick={() => setActiveTab(nav.id)}
-              className={`px-6 py-3 rounded-xl text-sm font-black whitespace-nowrap shrink-0 transition-all duration-200 flex items-center gap-2.5 ${
+              className={`px-5 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap shrink-0 transition-all duration-200 flex items-center gap-2 ${
                 activeTab === nav.id 
-                  ? 'bg-amber-500 text-slate-950 shadow-xl shadow-amber-500/30 translate-y-[-1px]' 
-                  : 'text-emerald-100/70 hover:text-white hover:bg-emerald-900/40'
+                  ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20 translate-y-[-1px]' 
+                  : 'text-emerald-100/70 hover:text-white hover:bg-emerald-900/30'
               }`}
             >
               <span>{nav.label}</span>
@@ -719,42 +774,51 @@ export default function App() {
 
         {/* Zone 3: Profile Badge, Language & Logout */}
         <div className="flex items-center gap-4 shrink-0">
-          <div className="hidden sm:flex items-center gap-3 bg-[#062414] border border-[#0f4425] rounded-2xl px-6 py-3 shadow-md group">
-            <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center text-xl border border-amber-500/20 group-hover:scale-110 transition-transform">👑</div>
+          <div className="hidden sm:flex items-center gap-3 bg-[#062414] border border-[#0f4425] rounded-2xl px-5 py-2.5 shadow-md group">
+            <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-lg border border-amber-500/20 group-hover:scale-110 transition-transform">👑</div>
             <div className="flex flex-col">
               <span className="font-black text-sm text-white">{currentAdmin.nameAm || 'አስተዳዳሪ'}</span>
-              <span className="text-[10px] text-amber-500 font-black uppercase tracking-tighter">Super Admin</span>
+              <span className="text-[10px] text-amber-500 font-extrabold uppercase tracking-tighter">
+                {currentAdmin.role === 'super_admin' ? 'Super Admin' : 'Admin'}
+              </span>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setIsChangePasswordModalOpen(true)}
+              className="p-3 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition-all shadow-sm hover:scale-105 active:scale-95"
+              title="የይለፍ ቃል ቀይር (Change Password)"
+            >
+              <KeyRound className="w-5 h-5" />
+            </button>
+            <button
               onClick={() => setIsNotificationModalOpen(true)}
-              className="p-3.5 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition-all shadow-sm hover:scale-105 active:scale-95"
+              className="p-3 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition-all shadow-sm hover:scale-105 active:scale-95"
               title="ማስታወቂያ ላክ"
             >
-              <Megaphone className="w-6 h-6" />
+              <Megaphone className="w-5 h-5" />
             </button>
             <button
               onClick={() => setLang(lang === 'am' ? 'en' : 'am')}
-              className="p-3.5 rounded-2xl bg-[#062414] hover:bg-emerald-900/40 text-slate-200 border border-[#0f4425] transition-all shadow-sm hover:scale-105 active:scale-95"
+              className="p-3 rounded-2xl bg-[#062414] hover:bg-emerald-900/40 text-slate-200 border border-[#0f4425] transition-all shadow-sm hover:scale-105 active:scale-95"
               title="Switch Language"
             >
-              <Globe className="w-6 h-6 text-amber-400" />
+              <Globe className="w-5 h-5 text-amber-400" />
             </button>
             <button
               onClick={() => setIsLoggedIn(false)}
-              className="p-3.5 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-all shadow-sm hover:scale-105 active:scale-95"
+              className="p-3 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-all shadow-sm hover:scale-105 active:scale-95"
               title="Log Out"
             >
-              <LogOut className="w-6 h-6" />
+              <LogOut className="w-5 h-5" />
             </button>
           </div>
         </div>
       </header>
 
       {/* Mobile Nav Bar - Redesigned for better UX and higher visual weight */}
-      <div className="no-print lg:hidden border-b border-[#0f4425] bg-[#09351c]/95 px-4 py-5 grid grid-cols-3 gap-3 sticky top-[94px] z-40 backdrop-blur-md shadow-lg">
+      <div className="no-print lg:hidden border-b border-[#0f4425] bg-[#09351c]/95 px-4 py-4 grid grid-cols-3 gap-2.5 sticky top-[80px] z-40 backdrop-blur-md">
         {[
           { id: 'schedule', label: 'መርሐ ግብር', icon: Calendar },
           { id: 'members', label: 'ተማሪዎች', icon: Users, count: pendingCount },
@@ -768,16 +832,16 @@ export default function App() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as typeof activeTab)}
-              className={`relative flex flex-col items-center justify-center gap-2 p-4 rounded-[1.5rem] transition-all duration-300 ${
+              className={`relative flex flex-col items-center justify-center gap-1.5 p-3 rounded-2xl transition-all duration-200 ${
                 activeTab === tab.id
-                  ? 'bg-amber-500 text-slate-950 shadow-2xl shadow-amber-500/40 ring-2 ring-amber-400 scale-95'
-                  : 'bg-[#062414]/80 text-emerald-100/70 border border-[#0f4425] hover:bg-emerald-900/40'
+                  ? 'bg-amber-500 text-slate-950 shadow-xl shadow-amber-500/20 ring-2 ring-amber-400/50 scale-95'
+                  : 'bg-[#062414]/60 text-emerald-100/70 border border-[#0f4425]/50'
               }`}
             >
-              <Icon className={`w-6 h-6 ${activeTab === tab.id ? 'text-slate-950' : 'text-amber-400'}`} />
-              <span className="text-[11px] font-black tracking-tight">{tab.label}</span>
+              <Icon className={`w-5 h-5 ${activeTab === tab.id ? 'text-slate-950' : 'text-amber-400'}`} />
+              <span className="text-[10px] font-black tracking-tight">{tab.label}</span>
               {tab.count && tab.count > 0 && activeTab !== tab.id && (
-                <span className="absolute -top-1 -right-1 bg-rose-500 text-white font-black px-2 py-0.5 rounded-full text-[10px] border-2 border-[#09351c] animate-pulse">
+                <span className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white font-black px-1.5 py-0.5 rounded-full text-[9px] border-2 border-[#09351c] animate-pulse">
                   {tab.count}
                 </span>
               )}
@@ -893,6 +957,13 @@ export default function App() {
         isOpen={isNotificationModalOpen}
         onClose={() => setIsNotificationModalOpen(false)}
         adminName={currentAdmin.nameAm}
+      />
+
+      {/* Change Password Modal for Active Admin */}
+      <ChangePasswordModal
+        isOpen={isChangePasswordModalOpen}
+        onClose={() => setIsChangePasswordModalOpen(false)}
+        currentAdmin={currentAdmin}
       />
 
       {/* Official Church Footer */}

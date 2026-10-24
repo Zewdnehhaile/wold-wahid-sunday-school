@@ -86,7 +86,12 @@ export class CollectionQuery {
     return { id: ref.id };
   }
 
-  doc(id: string) {
+  doc(id: string): { 
+    get(): Promise<{ id: string; exists: boolean; data: () => any }>; 
+    update(data: any): Promise<void>; 
+    set(data: any, options?: { merge: boolean }): Promise<void>;
+    delete(): Promise<void>; 
+  } {
     const docRef = doc(firestoreDb, this.colName, id);
     return {
       async get() {
@@ -99,6 +104,10 @@ export class CollectionQuery {
       },
       async update(data: any) {
         await updateDoc(docRef, data as Record<string, any>);
+      },
+      async set(data: any, options?: { merge: boolean }) {
+        const { setDoc } = await import('firebase/firestore');
+        await setDoc(docRef, data, options || {});
       },
       async delete() {
         await deleteDoc(docRef);

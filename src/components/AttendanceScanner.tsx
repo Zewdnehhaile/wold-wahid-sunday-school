@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Member, AttendanceRecord, ServiceSession, Language, AdminUser } from '../types';
 import { t } from '../utils/translations';
-import { formatEthiopianDate } from '../utils/ethiopianCalendar';
+import { formatEthiopianDate, formatEthiopianTime } from '../utils/ethiopianCalendar';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import {
   QrCode,
@@ -16,6 +16,9 @@ import {
   Calendar,
   Camera,
   AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  UserMinus,
 } from 'lucide-react';
 
 interface AttendanceScannerProps {
@@ -45,7 +48,7 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
 }) => {
   const [codeQuery, setCodeQuery] = useState('');
   const [scanErrorMessage, setScanErrorMessage] = useState('');
-  const [toast, setToast] = useState<{ name: string; code: string } | null>(null);
+  const [toast, setToast] = useState<{ name: string; code: string; status?: 'present' | 'already'; msg?: string } | null>(null);
   
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isKioskMode, setIsKioskMode] = useState(false);
@@ -130,12 +133,8 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
       );
     });
 
-    const currentTime = new Date().toLocaleTimeString('en-US', {
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
+    // Use Ethiopian Time for the record
+    const currentTime = formatEthiopianTime(new Date());
     const todayDate = new Date().toISOString().split('T')[0];
 
     if (!member) {
@@ -150,14 +149,18 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
     setScanErrorMessage('');
 
     const alreadyCheckedIn = attendance.some(
-      (att) => att.memberId === member.id && att.sessionName === activeSession.nameAm
+      (att) => att.memberId === member.id && (att.date === todayDate || att.sessionName === activeSession.nameAm)
     );
 
     if (alreadyCheckedIn) {
-      setScanErrorMessage('⚠️ አስቀድሞ ዛሬ ተመዝግቧል');
+      setScanErrorMessage(`⚠️ ተማሪ ${member.fullNameAm} (${member.code}) አስቀድሞ ዛሬ ተመዝግቧል!`);
+      setToast({ name: member.fullNameAm || member.fullNameEn, code: member.code, status: 'already', msg: '⚠️ አስቀድሞ ዛሬ ተመዝግቧል (Already Recorded)' });
+      setTimeout(() => setToast(null), 4000);
       playChime();
       return;
     }
+
+    setScanErrorMessage('');
 
     const newRecord: AttendanceRecord = {
       id: `att-${Date.now()}`,
@@ -175,8 +178,8 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
     };
 
     onCheckIn(newRecord);
-    setToast({ name: member.fullNameAm || member.fullNameEn, code: member.code });
-    setTimeout(() => setToast(null), 3000);
+    setToast({ name: member.fullNameAm || member.fullNameEn, code: member.code, status: 'present', msg: '✅ ተገኝቷል · PRESENT & RECORDED' });
+    setTimeout(() => setToast(null), 3500);
     playChime();
     setCodeQuery('');
   };
@@ -203,7 +206,6 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
       if (el) {
         el.style.display = 'block';
         
-        // Use the core Html5Qrcode class for explicit control over constraints
         const { Html5Qrcode } = await import('html5-qrcode');
         
         if (scannerRef.current) {
@@ -218,20 +220,17 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
         const config = { fps: 10, qrbox: { width: 250, height: 250 } };
         
         try {
-          // Explicitly request environment (back) camera
           await html5QrCode.start(
             { facingMode: "environment" },
             config,
             (decodedText) => {
               handleProcessCode(decodedText, 'qr');
-              // Optionally stop after first scan in non-kiosk mode
               if (!isKioskMode) {
                 html5QrCode.stop().catch(() => {});
                 el.style.display = 'none';
               }
             },
             (errorMessage) => {
-              // Ignore silent errors
             }
           );
         } catch (err: any) {
@@ -250,10 +249,12 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
     }
   };
 
-  const presentCount = attendance.filter((a) => a.sessionName === activeSession.nameAm && a.status !== 'absent').length;
-  const guestCount = attendance.filter((a) => a.sessionName === activeSession.nameAm && a.isGuest).length;
-  const totalMembersCount = members.length;
-  const attendanceRate = totalMembersCount > 0 ? Math.round((presentCount / totalMembersCount) * 100) : 0;
+  const currentAttendance = attendance.filter((a) => a.sessionName === activeSession.nameAm);
+  const presentRecords = currentAttendance.filter(a => a.status !== 'absent');
+  const absentees = members.filter(m => 
+    m.status === 'active' && 
+    !currentAttendance.some(a => a.memberId === m.id)
+  );
 
   return (
     <div className={`space-y-6 ${isKioskMode ? 'fixed inset-0 z-50 bg-[#062414] p-6 overflow-y-auto' : ''}`}>
@@ -261,10 +262,12 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
       
       {/* Toast Pop-up */}
       {toast && (
-        <div className="fixed top-20 left-4 right-4 z-50 p-6 bg-emerald-500 border-4 border-white rounded-3xl shadow-2xl text-center text-slate-950 animate-bounce">
+        <div className={`fixed top-20 left-4 right-4 z-50 p-6 border-4 border-white rounded-3xl shadow-2xl text-center text-slate-950 animate-bounce ${
+          toast.status === 'already' ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-slate-950'
+        }`}>
           <h2 className="text-2xl font-black">{toast.name}</h2>
           <p className="font-mono font-bold mt-1">{toast.code}</p>
-          <p className="text-sm mt-2">✅ ተመዝግበዋል / Present</p>
+          <p className="text-sm mt-2 font-bold">{toast.msg || '✅ ተመዝግበዋል / Present'}</p>
         </div>
       )}
 
@@ -277,78 +280,131 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
           <Camera className="w-4 h-4" />
           <span>📷 በካሜራ QR ኮድ ስካን ያድርጉ</span>
         </button>
-        {scanErrorMessage && <p className="text-red-400 text-xs mt-3">{scanErrorMessage}</p>}
+        {scanErrorMessage && (
+          <div className="mt-3 p-3 rounded-xl bg-rose-950/80 border border-rose-500/50 text-rose-200 text-xs flex items-center justify-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{scanErrorMessage}</span>
+          </div>
+        )}
         <form onSubmit={(e) => { e.preventDefault(); handleProcessCode(codeQuery, 'manual'); }} className="mt-4 flex items-center gap-2">
           <input type="text" value={codeQuery} onChange={(e) => setCodeQuery(e.target.value)} placeholder="መለያ ቁጥር" className="flex-1 px-3.5 py-2.5 bg-[#062414] border border-[#0f4425] rounded-xl text-xs text-white" />
           <button type="submit" className="px-4 py-2.5 bg-amber-500 text-slate-950 rounded-xl text-xs font-bold">መዝግብ</button>
         </form>
       </div>
 
-      {/* Attendance List */}
-      <div className="bg-[#09351c] border border-[#0f4425] rounded-2xl p-5 shadow-xl">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-bold text-white">የተመዘገቡ ተማሪዎች ({attendance.length})</h3>
-          <button
-            onClick={async () => {
-              const absentees = members.filter(m => 
-                m.status === 'active' && 
-                !attendance.some(a => a.memberId === m.id && a.sessionName === activeSession.nameAm)
-              );
-              
-              const targetIds = absentees.map(m => m.telegramId).filter(Boolean);
-              
-              if (targetIds.length === 0) {
-                alert('ከተቀሩት ተማሪዎች መካከል የቴሌግራም አካውንታቸው የተገናኘ ተማሪ አልተገኘም (No linked Telegram accounts found).');
-                return;
-              }
-
-              if (confirm(`${absentees.length} ተማሪዎች ዛሬ አልተገኙም። መንፈሳዊ የማሳሰቢያ መልእክት ለ ${targetIds.length} ተማሪዎች መላክ ይፈልጋሉ?`)) {
-                try {
-                  const res = await fetch('/api/notifications/broadcast', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      title: 'የዛሬው መርሐ ግብር ናፍቆት',
-                      message: `ሰላም ለኪ/ለከ ይሁን! ✝️\n\nዛሬ በ"${activeSession.nameAm}" መርሐ ግብራችን ላይ ስላልተገኙ ትምህርቱም ሆነ በረከቱ ጎድሎብናልና አዝነናል።\n\nምናልባትም በምክንያት ከሆነ የፈቃድ መጠየቂያ በቦቱ በኩል እንዲልኩ እናሳስባለን።\n\nየእግዚአብሔር ጸጋና ሰላም ከእርስዎ ጋር ይሁን።`,
-                      senderName: currentAdmin?.nameAm || 'አስተዳዳሪ',
-                      targetIds: targetIds
-                    }),
-                  });
-                  const data = await res.json();
-                  alert(`መልእክቱ ለ ${data.sentToTelegram || 0} ተማሪዎች ተልኳል።`);
-                } catch (err) {
-                  alert('መልእክቱን መላክ አልተቻለም።');
-                }
-              }
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-bold transition-colors"
-          >
-            <AlertCircle className="w-3.5 h-3.5" />
-            <span>አልተገኙም (Absentees)</span>
-          </button>
+      {/* Attendance Lists */}
+      <div className="bg-[#09351c] border border-[#0f4425] rounded-3xl p-6 shadow-2xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 border-b border-[#0f4425] pb-4">
+          <div>
+            <h2 className="text-lg font-black text-white flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-amber-400" />
+              <span>የዛሬ መገኘት ክትትል</span>
+            </h2>
+            <p className="text-xs text-amber-400/80 font-bold mt-1">
+              📅 {formatEthiopianDate(new Date())}
+            </p>
+          </div>
+          <div className="px-4 py-2 rounded-2xl bg-[#062414] border border-[#0f4425] text-center">
+            <p className="text-[10px] text-emerald-200/60 uppercase font-black tracking-widest">አሁኑ ክፍለ-ጊዜ</p>
+            <p className="text-sm font-black text-white">{activeSession.nameAm}</p>
+          </div>
         </div>
-        <div className="space-y-2">
-          {attendance.map((record) => (
-            <div key={record.id} className="p-3 rounded-xl bg-[#062414] border border-[#0f4425] flex items-center justify-between gap-3 text-xs">
-              <div>
-                <p className="font-bold text-white">{record.memberNameAm || record.memberNameEn}</p>
-                <p className="text-[11px] text-amber-400">{record.memberCode} · ⏰ {record.timestamp}</p>
-              </div>
-              <select 
-                value={record.status} 
-                onChange={(e) => onUpdateAttendance?.(record.id, { status: e.target.value as any })}
-                className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${
-                  record.status === 'absent' ? 'bg-rose-500/20 text-rose-300 border-rose-500/30' :
-                  record.status === 'excused' ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' :
-                  'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                }`}
-              >
-                <option value="present">🟢 ተገኝቷል</option>
-                <option value="absent">🔴 ቀርቷል</option>
-                <option value="excused">🟡 ፈቃድ</option>
-              </select>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Present List */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 px-1">
+              <UserCheck className="w-5 h-5 text-emerald-400" />
+              <h3 className="text-sm font-black text-white">የተመዘገቡ ተማሪዎች ({presentRecords.length})</h3>
             </div>
-          ))}
+          <div className="space-y-2 max-h-[400px] overflow-y-auto no-scrollbar">
+            {presentRecords.length === 0 ? (
+              <p className="text-center py-8 text-emerald-900/40 text-xs italic">ምንም ተማሪ አልተመዘገበም</p>
+            ) : (
+              presentRecords.map((record) => (
+                <div key={record.id} className="p-3 rounded-xl bg-[#062414] border border-[#0f4425] flex items-center justify-between gap-3 text-xs">
+                  <div>
+                    <p className="font-bold text-white">{record.memberNameAm || record.memberNameEn}</p>
+                    <p className="text-[11px] text-amber-400">{record.memberCode} · ⏰ {record.timestamp}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select 
+                      value={record.status} 
+                      onChange={(e) => onUpdateAttendance?.(record.id, { status: e.target.value as any })}
+                      className="px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold"
+                    >
+                      <option value="present">🟢 ተገኝቷል</option>
+                      <option value="absent">🔴 ቀርቷል</option>
+                      <option value="excused">🟡 ፈቃድ</option>
+                    </select>
+                    {onDeleteAttendance && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteAttendance(record.id)}
+                        className="p-1 rounded-lg text-rose-400 hover:bg-rose-950/60 transition-colors cursor-pointer"
+                        title="መዝገቡን ሰርዝ (Delete Attendance)"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Absentees List */}
+        <div className="bg-[#09351c] border border-[#0f4425] rounded-2xl p-5 shadow-xl h-fit">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <UserMinus className="w-5 h-5 text-rose-400" />
+              <h3 className="text-sm font-bold text-white">አልተገኙም (Absentees) ({absentees.length})</h3>
+            </div>
+            <button
+              onClick={async () => {
+                if (absentees.length === 0) return;
+                if (confirm(`${absentees.length} ተማሪዎች ዛሬ አልተገኙም። መንፈሳዊ የማሳሰቢያ መልእክት ለሁሉም መላክ ይፈልጋሉ?`)) {
+                  try {
+                    const res = await fetch('/api/notifications/broadcast', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        title: 'የዛሬው መርሐ ግብር ናፍቆት',
+                        message: `በክርስቶስ ፍጹም ሰላም እንደምን ቆያችሁ? ✝️\n\nዛሬ በ"${activeSession.nameAm}" መርሐ ግብራችን ላይ ስላልተገኙ ትምህርቱም ሆነ በረከቱ ጎድሎብናልና ናፍቆታችን ይድረስዎት።\n\nምናልባትም በበቂ ምክንያት ከሆነ በቦቱ በኩል "✉️ የፈቃድ መጠየቂያ" እንዲልኩ እናሳስባለን።\n\nየእግዚአብሔር ጸጋና ሰላም ከእርስዎ ጋር ይሁን።`,
+                        senderName: currentAdmin?.nameAm || 'አስተዳዳሪ',
+                        targetIds: absentees.map(m => m.telegramId).filter(Boolean)
+                      }),
+                    });
+                    const data = await res.json();
+                    alert(`መልእክቱ ለ ${data.sentToTelegram || 0} ተማሪዎች ተልኳል።`);
+                  } catch (err) {
+                    alert('መልእክቱን መላክ አልተቻለም።');
+                  }
+                }
+              }}
+              className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-colors"
+              title="ማሳሰቢያ ላክ"
+            >
+              <AlertCircle className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="space-y-2 max-h-[400px] overflow-y-auto no-scrollbar">
+            {absentees.length === 0 ? (
+              <p className="text-center py-8 text-emerald-900/40 text-xs italic">ሁሉም ተማሪዎች ተገኝተዋል</p>
+            ) : (
+              absentees.map((member) => (
+                <div key={member.id} className="p-3 rounded-xl bg-[#062414] border border-[#0f4425] flex items-center justify-between gap-3 text-xs opacity-70">
+                  <div>
+                    <p className="font-bold text-white/80">{member.fullNameAm}</p>
+                    <p className="text-[10px] text-slate-500">{member.code} · {member.phone}</p>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/30 text-[9px] font-bold">ያልተገኘ</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
         </div>
       </div>
     </div>

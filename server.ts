@@ -73,30 +73,28 @@ async function startServer() {
         updatedAt: new Date().toISOString()
       });
 
-      // Check if student profile already exists in students collection
-      const studentQuery = await db.collection('students').where('code', '==', studentCode).get();
-      if (studentQuery.empty) {
-        await db.collection('students').add({
-          code: studentCode,
-          studentCode,
-          fullNameAm: regData.fullNameAm || 'ተማሪ',
-          fullNameEn: regData.fullNameEn || 'Student',
-          christianName: regData.christianName || '',
-          birthYear: regData.birthYear || regData.birthDate || '',
-          phone: regData.phone || '',
-          gender: regData.gender || 'male',
-          department: regData.department || 'education',
-          gradeLevel: regData.gradeLevel || 'general',
-          photoUrl: regData.photoUrl || '',
-          emergencyContact: regData.emergencyContact || { name: '', phone: '', relation: '' },
-          subcity: regData.subcity || regData.address || '',
-          telegramId: regData.telegramId || '',
-          status: 'active',
-          registeredDate: new Date().toISOString().split('T')[0],
-          approvedBy: approvedBy || 'ዋና አስተዳዳሪ',
-          approvedAt: new Date().toISOString()
-        });
-      }
+      // 2. Add or update active student record in students collection using the SAME ID as registration
+      const studentRef = db.collection('students').doc(id);
+      await studentRef.set({
+        code: studentCode,
+        studentCode,
+        fullNameAm: regData.fullNameAm || 'ተማሪ',
+        fullNameEn: regData.fullNameEn || 'Student',
+        christianName: regData.christianName || '',
+        birthYear: regData.birthYear || regData.birthDate || '',
+        phone: regData.phone || '',
+        gender: regData.gender || 'male',
+        department: regData.department || 'education',
+        gradeLevel: regData.gradeLevel || 'general',
+        photoUrl: regData.photoUrl || '',
+        emergencyContact: regData.emergencyContact || { name: '', phone: '', relation: 'ቤተሰብ / Family' },
+        subcity: regData.subcity || regData.address || '',
+        telegramId: regData.telegramId || '',
+        status: 'active',
+        registeredDate: new Date().toISOString().split('T')[0],
+        approvedBy: approvedBy || 'ዋና አስተዳዳሪ',
+        approvedAt: new Date().toISOString()
+      }, { merge: true });
 
       // Dispatch Telegram notification to student if telegramId exists
       if (regData.telegramId) {
@@ -121,7 +119,6 @@ async function startServer() {
     }
   });
 
-  // Broadcast Notification API (Push to Telegram + save in Firestore for mobile apps)
   app.post('/api/notifications/broadcast', async (req, res) => {
     try {
       const { title, message, senderName } = req.body;
@@ -144,27 +141,31 @@ async function startServer() {
       const bot = getBot();
       if (bot) {
         const { targetIds } = req.body;
-        let tgIds = new Set<number | string>();
+        let tgIds = new Set<string>();
 
-        if (targetIds && Array.isArray(targetIds)) {
-          const validIds = targetIds.filter(id => id && (typeof id === 'string' || typeof id === 'number'));
-          validIds.forEach(id => tgIds.add(id));
+        if (targetIds && Array.isArray(targetIds) && targetIds.length > 0) {
+          targetIds.forEach(id => {
+            if (id) tgIds.add(String(id));
+          });
         } else {
           const studentSnap = await db.collection('students').get();
           const regSnap = await db.collection('registrations').get();
 
-          console.log(`📣 Broadcasting to everyone: Found ${studentSnap.size} students and ${regSnap.size} registrations.`);
+          console.log(`📣 Broadcasting: Found ${studentSnap.size} students and ${regSnap.size} registrations.`);
           studentSnap.docs.forEach((d) => {
-            const tId = d.data().telegramId;
-            if (tId) tgIds.add(tId);
+            const data = d.data();
+            const tId = data.telegramId || data.tgId;
+            if (tId) tgIds.add(String(tId));
           });
 
           regSnap.docs.forEach((d) => {
-            const tId = d.data().telegramId;
-            if (tId) tgIds.add(tId);
+            const data = d.data();
+            const tId = data.telegramId || data.tgId;
+            if (tId) tgIds.add(String(tId));
           });
         }
-        console.log(`📣 Final set of unique Telegram IDs: ${tgIds.size}`);
+        
+        console.log(`📣 Unique Telegram IDs collected for broadcast: ${tgIds.size}`);
 
         const broadcastMsg = 
           `📢 *አዲስ ማስታወቂያ (Announcement)*\n` +
@@ -180,7 +181,9 @@ async function startServer() {
           try {
             await bot.sendMessage(chatId, broadcastMsg, { parse_mode: 'Markdown' });
             sentCount++;
-          } catch (_) {}
+          } catch (sendErr: any) {
+            console.warn(`Failed to send broadcast to ${chatId}:`, sendErr.message);
+          }
         }
       }
 
@@ -191,7 +194,7 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error('Error broadcasting notification:', err);
-      res.status(500).json({ error: 'Failed to broadcast notification' });
+      res.status(500).json({ error: 'Failed to broadcast notification: ' + (err.message || 'Unknown error') });
     }
   });
 
@@ -288,7 +291,7 @@ async function startServer() {
     }
   });
 
-  // Support ticket note/reply API (Add note + notify requester on Telegram)
+  // Support ticket note/reply API (Add note + notify requester directly on Telegram and targeted notifications)
   app.post('/api/support_tickets/:id/note', async (req, res) => {
     try {
       const { id } = req.params;
@@ -312,11 +315,38 @@ async function startServer() {
         updatedAt: new Date().toISOString()
       });
 
+      // Find Telegram ID if missing on ticket
+      let recipientTelegramId = ticketData.telegramId;
+      if (!recipientTelegramId && (ticketData.phone || ticketData.requesterName)) {
+        try {
+          const cleanPhone = (ticketData.phone || '').replace(/\D/g, '').slice(-9);
+          const [studentSnap, regSnap] = await Promise.all([
+            db.collection('students').get(),
+            db.collection('registrations').get(),
+          ]);
+          const allDocs = [...studentSnap.docs, ...regSnap.docs];
+          for (const d of allDocs) {
+            const dData = d.data();
+            const dPhone = (dData.phone || '').replace(/\D/g, '').slice(-9);
+            const dName = (dData.fullNameAm || dData.fullNameEn || '').trim().toLowerCase();
+            const reqName = (ticketData.requesterName || '').trim().toLowerCase();
+            if ((cleanPhone && dPhone === cleanPhone) || (reqName && dName === reqName)) {
+              recipientTelegramId = dData.telegramId || dData.tgId;
+              if (recipientTelegramId) break;
+            }
+          }
+        } catch (findErr) {
+          console.warn('Error resolving telegramId for support requester:', findErr);
+        }
+      }
+
+      // Send direct Telegram notification to requester
+      let sentToTg = false;
       const bot = getBot();
-      if (bot && ticketData.telegramId) {
+      if (bot && recipientTelegramId) {
         try {
           await bot.sendMessage(
-            ticketData.telegramId,
+            recipientTelegramId,
             `💬 *የድጋፍ ጥያቄ ምላሽ (Support Desk Response)*\n` +
             `⛪ መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን\n` +
             `═══════════════════════\n\n` +
@@ -324,36 +354,67 @@ async function startServer() {
             `• *ርዕስ/ጉዳይ:* ${ticketData.title || ticketData.category}\n\n` +
             `✍️ *ከአስተዳዳሪው የተላከ ምላሽ (Admin Reply):*\n` +
             `"${text}"\n\n` +
-            `⏰ *ሰዓት:* ${newNote.date}`,
+            `⏰ *ሰዓት:* ${newNote.date}\n` +
+            `═══════════════════════\n` +
+            `እግዚአብሔር ይባርክዎ!`,
             { parse_mode: 'Markdown' }
           );
-        } catch (tgErr) {
-          console.error('Failed to notify student on Telegram for support note:', tgErr);
+          sentToTg = true;
+          console.log(`✅ Direct support reply sent to Telegram user ${recipientTelegramId}`);
+        } catch (tgErr: any) {
+          console.error('Failed to notify student on Telegram for support note:', tgErr.message);
         }
       }
 
-      res.json({ success: true, message: 'Support ticket note added and student notified.' });
+      // Save targeted notification for the requester (received on mobile/student app)
+      await db.collection('notifications').add({
+        title: `💬 ለድጋፍ ጥያቄዎ (${ticketData.ticketNumber || id}) የተሰጠ ምላሽ`,
+        message: `ከ${author || 'አስተባባሪ'}: "${text}"`,
+        senderName: author || 'አስተባባሪ',
+        targetRequesterName: ticketData.requesterName || '',
+        targetPhone: ticketData.phone || '',
+        targetTelegramId: recipientTelegramId || '',
+        ticketId: id,
+        ticketNumber: ticketData.ticketNumber || id,
+        createdAt: new Date().toISOString(),
+        isDirectReply: true,
+      }).catch(console.error);
+
+      res.json({ success: true, sentToTelegram: sentToTg, message: 'Support ticket note added and dispatched directly to requester.' });
     } catch (error) {
+      console.error('Failed to add support ticket note:', error);
       res.status(500).json({ error: 'Failed to add support ticket note' });
     }
   });
 
   app.delete('/api/leave_requests/:id', async (req, res) => {
     try {
-      await db.collection('leave_requests').doc(req.params.id).delete();
+      const { id } = req.params;
+      const ref = db.collection('leave_requests').doc(id);
+      const snap = await ref.get();
+      if (snap.exists) {
+        await ref.delete();
+      }
       res.json({ success: true, message: 'Leave request deleted.' });
     } catch (error) {
-      console.error('Delete leave request error:', error);
       res.status(500).json({ error: 'Failed to delete leave request' });
     }
   });
 
   app.delete('/api/support_tickets/:id', async (req, res) => {
     try {
-      await db.collection('support_tickets').doc(req.params.id).delete();
+      const { id } = req.params;
+      const ref = db.collection('support_tickets').doc(id);
+      const snap = await ref.get();
+      if (snap.exists) {
+        await ref.delete();
+      }
+      const querySnap = await db.collection('support_tickets').where('ticketNumber', '==', id).get();
+      for (const d of querySnap.docs) {
+        await db.collection('support_tickets').doc(d.id).delete();
+      }
       res.json({ success: true, message: 'Support ticket deleted.' });
     } catch (error) {
-      console.error('Delete support ticket error:', error);
       res.status(500).json({ error: 'Failed to delete support ticket' });
     }
   });

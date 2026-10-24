@@ -101,6 +101,24 @@
         "performedBy": { "type": "string" }
       },
       "required": ["action", "timestamp", "performedBy"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Administrator account with credentials, role, and permissions",
+      "type": "object",
+      "properties": {
+        "nameAm": { "type": "string" },
+        "nameEn": { "type": "string" },
+        "phone": { "type": "string" },
+        "password": { "type": "string" },
+        "role": { "type": "string", "enum": ["super_admin", "admin"] },
+        "department": { "type": "string" },
+        "customRoleTitle": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "telegramId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["nameAm", "phone", "password", "role", "status"]
     }
   },
   "firestore": {
@@ -111,6 +129,7 @@
     "support_tickets": { "schema": "SupportTicket", "description": "Collection of support tickets" },
     "leave_requests": { "schema": "LeaveRequest", "description": "Collection of leave requests" },
     "users": { "schema": "User", "description": "Collection of users" },
+    "admins": { "schema": "Admin", "description": "Collection of admin credentials and permissions" },
     "sessions": { "schema": "Session", "description": "Collection of sessions" },
     "audit_logs": { "schema": "AuditLog", "description": "Collection of audit logs" }
   }
