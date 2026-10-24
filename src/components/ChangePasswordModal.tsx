@@ -63,6 +63,12 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
     const cleanConfirmPass = confirmPassword.trim();
     const cleanCurrentPass = currentPassword.trim();
 
+    // Super admins cannot change each other's passwords
+    if (isEditingOther && currentAdmin.role === 'super_admin' && targetAdmin?.role === 'super_admin') {
+      setError('ዋና አስተዳዳሪዎች የሌላ ዋና አስተዳዳሪን የይለፍ ቃል መቀየር አይችሉም (Super admins cannot change another super admin password)');
+      return;
+    }
+
     // If changing own password, current password is required
     if (!isEditingOther && !cleanCurrentPass) {
       setError('እባክዎ የአሁኑን የይለፍ ቃል ያስገቡ (Please enter current password)');

@@ -197,6 +197,7 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
                 {/* Footer Strip */}
                 <div className="border-t border-slate-800/80 pt-2 flex items-center justify-between text-[9px] text-slate-400">
                   <span>ተመዝግቧል: {currentMember.registeredDate}</span>
+                  <span className="text-amber-400 font-mono font-bold">ተ.ቁ #{Math.max(1, members.findIndex(m => m.id === currentMember.id) + 1)}</span>
                   <span className="text-amber-400/80 font-medium">የአባልነት መታወቂያ</span>
                 </div>
               </>

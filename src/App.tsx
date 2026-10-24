@@ -660,6 +660,26 @@ export default function App() {
     }
   };
 
+  const handleUpdateLeaveRequestStatus = async (requestId: string, status: 'approved' | 'rejected', reason: string) => {
+    try {
+      setLeaveRequests((prev) => prev.map((l) => (l.id === requestId ? { ...l, status, reason: reason || l.reason } : l)));
+      await updateDoc(doc(db, 'leave_requests', requestId), {
+        status,
+        reason: reason,
+        approvedBy: currentAdmin.nameAm,
+        updatedAt: new Date().toISOString(),
+      }).catch(console.error);
+
+      await fetch(`/api/leave_requests/${requestId}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, adminName: currentAdmin.nameAm, reason }),
+      }).catch(() => {});
+    } catch (e) {
+      console.error('Update leave request status failed:', e);
+    }
+  };
+
   const handleOpenCardStudio = (member?: Member) => {
     setStudioTargetMember(member || members[0] || null);
     setIsCardStudioOpen(true);
@@ -919,6 +939,7 @@ export default function App() {
             onUpdateTicketStatus={handleUpdateTicketStatus}
             onDeleteTicket={handleDeleteTicket}
             onDeleteLeaveRequest={handleDeleteLeaveRequest}
+            onUpdateLeaveRequestStatus={handleUpdateLeaveRequestStatus}
             onAddNote={handleAddNote}
             onUpdateAttendance={handleUpdateAttendance}
             lang={lang}

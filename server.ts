@@ -198,11 +198,11 @@ async function startServer() {
     }
   });
 
-  // Leave request status update API (Approve/Reject + notify user on Telegram)
+  // Leave request status update API (Approve/Reject + notify user on Telegram & notifications)
   app.post('/api/leave_requests/:id/status', async (req, res) => {
     try {
       const { id } = req.params;
-      const { status, adminName } = req.body;
+      const { status, adminName, reason } = req.body;
 
       const leaveRef = db.collection('leave_requests').doc(id);
       const leaveDoc = await leaveRef.get();
@@ -211,9 +211,21 @@ async function startServer() {
       const leaveData = leaveDoc.data()!;
       await leaveRef.update({
         status,
+        reason: reason || leaveData.reason,
         approvedBy: adminName || 'አስተዳዳሪ',
         updatedAt: new Date().toISOString()
       });
+
+      // Save targeted notification for the student (received on mobile/student app)
+      await db.collection('notifications').add({
+        title: `✉️ የፈቃድ ጥያቄዎ ${status === 'approved' ? 'ጸድቋል' : 'አልተቀበለም'}`,
+        message: `ምክንያት / ማስታወሻ: ${reason || (status === 'approved' ? 'ፈቃድዎ ጸድቋል' : 'የተጠየቀው ፈቃድ አልተፈቀደም')}`,
+        senderName: adminName || 'አስተዳዳሪ',
+        targetTelegramId: leaveData.telegramId || '',
+        leaveRequestId: id,
+        createdAt: new Date().toISOString(),
+        isDirectReply: true,
+      }).catch(console.error);
 
       const bot = getBot();
       if (bot && leaveData.telegramId) {
@@ -228,6 +240,7 @@ async function startServer() {
             `• *የፈቃድ ዓይነት:* ${leaveData.leaveType || 'ፈቃድ'}\n` +
             `• *ወቅት/ጊዜ:* ${leaveData.duration || 'N/A'}\n` +
             `• *አሁን ያለው ሁኔታ (Status):* *${statusAm}*\n` +
+            `• *ምክንያት / አስተያየት (Reason):* ${reason || 'የለም'}\n` +
             `• *የወሰነው:* ${adminName || 'አስተዳዳሪ'}\n\n` +
             `ትኩረትዎ እናመሰግናለን!`,
             { parse_mode: 'Markdown' }
@@ -239,8 +252,9 @@ async function startServer() {
         console.warn(`Cannot send leave notification. Bot: ${!!bot}, TelegramId: ${leaveData.telegramId}`);
       }
 
-      res.json({ success: true, message: 'Leave request status updated and student notified.' });
+      res.json({ success: true, message: 'Leave request status updated and student notified with reason.' });
     } catch (error) {
+      console.error('Failed to update leave request status:', error);
       res.status(500).json({ error: 'Failed to update leave request status' });
     }
   });
