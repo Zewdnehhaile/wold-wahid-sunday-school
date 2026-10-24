@@ -1,0 +1,117 @@
+{
+  "entities": {
+    "Registration": {
+      "title": "Registration",
+      "description": "Pending student registration request",
+      "type": "object",
+      "properties": {
+        "studentName": { "type": "string" },
+        "dateOfBirth": { "type": "string", "format": "date" },
+        "guardianName": { "type": "string" },
+        "classPreference": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "referenceNumber": { "type": "string" }
+      },
+      "required": ["studentName", "status", "createdAt", "referenceNumber"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Approved student profile",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "studentId": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "qrCodeIdentifier": { "type": "string" }
+      },
+      "required": ["name", "studentId", "status"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Student attendance record",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["studentId", "sessionId", "timestamp"]
+    },
+    "Class": {
+      "title": "Class",
+      "description": "Class definition",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "schedule": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "Student support request",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "message": { "type": "string" },
+        "status": { "type": "string", "enum": ["open", "closed"] }
+      },
+      "required": ["studentId", "message", "status"]
+    },
+    "LeaveRequest": {
+      "title": "LeaveRequest",
+      "description": "Leave request for absence",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "startDate": { "type": "string", "format": "date" },
+        "endDate": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] }
+      },
+      "required": ["studentId", "startDate", "endDate", "status"]
+    },
+    "User": {
+      "title": "User",
+      "description": "System user with roles",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["superadmin", "admin", "staff"] }
+      },
+      "required": ["email", "role"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "Class session instance",
+      "type": "object",
+      "properties": {
+        "classId": { "type": "string" },
+        "date": { "type": "string", "format": "date" }
+      },
+      "required": ["classId", "date"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Administrative action log",
+      "type": "object",
+      "properties": {
+        "action": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "performedBy": { "type": "string" }
+      },
+      "required": ["action", "timestamp", "performedBy"]
+    }
+  },
+  "firestore": {
+    "registrations": { "schema": "Registration", "description": "Collection of registration requests" },
+    "students": { "schema": "Student", "description": "Collection of approved students" },
+    "attendance": { "schema": "Attendance", "description": "Collection of attendance records" },
+    "classes": { "schema": "Class", "description": "Collection of classes" },
+    "support_tickets": { "schema": "SupportTicket", "description": "Collection of support tickets" },
+    "leave_requests": { "schema": "LeaveRequest", "description": "Collection of leave requests" },
+    "users": { "schema": "User", "description": "Collection of users" },
+    "sessions": { "schema": "Session", "description": "Collection of sessions" },
+    "audit_logs": { "schema": "AuditLog", "description": "Collection of audit logs" }
+  }
+}

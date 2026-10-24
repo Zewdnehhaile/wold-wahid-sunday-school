@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="am">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>ወልደ ዋሕድ ሰንበት ት/ቤት - መካነ ቅዱሳን ኢያቄም ወሐና</title>
+    <meta name="description" content="የወልደ ዋሕድ ሰንበት ትምህርት ቤት የተማሪዎች መታወቂያ፣ የሳምንታዊ መርሐ ግብርና የመገኘት ክትትል ሥርዓት" />
+    <meta property="og:title" content="ወልደ ዋሕድ ሰንበት ት/ቤት - መካነ ቅዱሳን ኢያቄም ወሐና" />
+    <meta property="og:description" content="የወልደ ዋሕድ ሰንበት ትምህርት ቤት የተማሪዎች መታወቂያ፣ የሳምንታዊ መርሐ ግብርና የመገኘት ክትትል ሥርዓት" />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#062414" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ወልደ ዋሕድ" />
+    <link rel="apple-touch-icon" href="/assets/aistudio/photo_2026-10-22_10-46-07__2__5dd80c37.jpg" />
+    <link rel="manifest" href="/manifest.json" />
+    <script>
+      // Vite HMR is disabled in AI Studio cloud preview environment
+      (function() {
+        var NativeWebSocket = window.WebSocket;
+        if (NativeWebSocket) {
+          window.WebSocket = function(url, protocols) {
+            var isViteHmr = 
+              (typeof protocols === 'string' && protocols.indexOf('vite') !== -1) ||
+              (Array.isArray(protocols) && protocols.some(function(p) { return typeof p === 'string' && p.indexOf('vite') !== -1; })) ||
+              (typeof url === 'string' && url.indexOf('vite') !== -1);
+            
+            if (isViteHmr) {
+              var target = new EventTarget();
+              target.readyState = 3; // CLOSED
+              target.send = function() {};
+              target.close = function() {};
+              target.url = url;
+              target.protocol = 'vite-hmr';
+              target.bufferedAmount = 0;
+              target.extensions = '';
+              target.binaryType = 'blob';
+              return target;
+            }
+            return new NativeWebSocket(url, protocols);
+          };
+          window.WebSocket.prototype = NativeWebSocket.prototype;
+          window.WebSocket.CONNECTING = 0;
+          window.WebSocket.OPEN = 1;
+          window.WebSocket.CLOSING = 2;
+          window.WebSocket.CLOSED = 3;
+        }
+
+        window.addEventListener('error', function(e) {
+          if (
+            (e.message && (e.message.indexOf('WebSocket') !== -1 || e.message.indexOf('@vite/client') !== -1)) ||
+            (e.filename && e.filename.indexOf('@vite/client') !== -1)
+          ) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(e) {
+          var reason = e.reason ? String(e.reason.message || e.reason) : '';
+          if (reason.indexOf('WebSocket') !== -1 || reason.indexOf('@vite/client') !== -1) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }, true);
+      })();
+    </script>
+  </head>
+  <body class="bg-[#062414]">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW register fail:', err));
+        });
+      }
+    </script>
+  </body>
+</html>
+

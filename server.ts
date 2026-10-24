@@ -1,0 +1,369 @@
+import express from 'express';
+import cors from 'cors';
+import * as dotenv from 'dotenv';
+import { createServer as createViteServer } from 'vite';
+import { db } from './backend/src/services/firebase.ts';
+import { bot, handleTelegramUpdate, dispatchSendMessage } from './backend/src/services/bot.ts';
+import { doc, deleteDoc } from 'firebase/firestore';
+
+dotenv.config();
+
+async function startServer() {
+  const app = express();
+  app.use(cors());
+  app.use(express.json());
+
+  // API Routes
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  // Telegram Webhook Endpoint
+  app.post('/api/telegram/webhook', async (req, res) => {
+    try {
+      await handleTelegramUpdate(req.body);
+      res.sendStatus(200);
+    } catch (err) {
+      console.error('Error in Telegram webhook endpoint:', err);
+      res.sendStatus(200);
+    }
+  });
+
+  app.get('/api/registrations/:id', async (req, res) => {
+    try {
+      const doc = await db.collection('registrations').doc(req.params.id).get();
+      if (!doc.exists) {
+        return res.status(404).json({ error: 'Registration not found' });
+      }
+      res.json({ id: doc.id, ...doc.data() });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
+
+  app.post('/api/registrations/:id/approve', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { studentCode, approvedBy } = req.body;
+
+      let regRef = db.collection('registrations').doc(id);
+      let regDoc = await regRef.get();
+
+      if (!regDoc.exists) {
+        const byTg = await db.collection('registrations').where('telegramId', '==', id).get();
+        if (!byTg.empty) {
+          regRef = db.collection('registrations').doc(byTg.docs[0].id);
+          regDoc = await regRef.get();
+        }
+      }
+
+      if (!regDoc.exists) {
+        console.warn(`Registration ${id} not found in database.`);
+        return res.status(404).json({ error: 'Registration not found' });
+      }
+
+      const regData = regDoc.data()!;
+      
+      await regRef.update({
+        status: 'approved',
+        studentCode,
+        code: studentCode,
+        approvedBy: approvedBy || 'ዋና አስተዳዳሪ',
+        approvedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+
+      // Check if student profile already exists in students collection
+      const studentQuery = await db.collection('students').where('code', '==', studentCode).get();
+      if (studentQuery.empty) {
+        await db.collection('students').add({
+          code: studentCode,
+          studentCode,
+          fullNameAm: regData.fullNameAm || 'ተማሪ',
+          fullNameEn: regData.fullNameEn || 'Student',
+          phone: regData.phone || '',
+          gender: regData.gender || 'male',
+          department: regData.department || 'education',
+          gradeLevel: regData.gradeLevel || 'general',
+          telegramId: regData.telegramId || '',
+          status: 'active',
+          registeredDate: new Date().toISOString().split('T')[0],
+          approvedBy: approvedBy || 'ዋና አስተዳዳሪ',
+          approvedAt: new Date().toISOString()
+        });
+      }
+
+      // Dispatch Telegram notification to student if telegramId exists
+      if (regData.telegramId) {
+        try {
+          await dispatchSendMessage(
+            regData.telegramId,
+            `🎉 *እንኳን ደስ አለዎት! ምዝገባዎ ጸድቋል*\n*Congratulations! Registration Approved*\n\n` +
+            `በመካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን የወልደ ዋሕድ ሰንበት ት/ቤት ምዝገባዎ በአስተዳዳሪው ጸድቋል!\n\n` +
+            `🆔 *የተመደበ የተማሪ መታወቂያ:* \`${studentCode}\`\n\n` +
+            `አሁን በቦቱ ውስጥ "👤 የኔ መታወቂያና QR" ወይም /start የሚለውን በመጫን የእርስዎን ኦፊሴላዊ የQR ዲጂታል መታወቂያ ካርድ መቀበል ይችላሉ።`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (tgErr) {
+          console.error('Failed to send Telegram notification:', tgErr);
+        }
+      }
+
+      res.json({ success: true, message: 'Registration approved and student profile created.', studentCode });
+    } catch (error) {
+      console.error('Approval API error in server.ts:', error);
+      res.status(500).json({ error: 'Approval failed' });
+    }
+  });
+
+  // Broadcast Notification API (Push to Telegram + save in Firestore for mobile apps)
+  app.post('/api/notifications/broadcast', async (req, res) => {
+    try {
+      const { title, message, senderName } = req.body;
+      if (!message) {
+        return res.status(400).json({ error: 'Message content is required' });
+      }
+
+      const notifDoc = {
+        title: title || 'ወልደ ዋሕድ ሰንበት ት/ቤት ማስታወቂያ',
+        message: message,
+        senderName: senderName || 'አስተዳዳሪ',
+        createdAt: new Date().toISOString(),
+        church: 'መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን',
+      };
+
+      await db.collection('notifications').add(notifDoc);
+
+      // Collect all student & registration telegram IDs
+      let sentCount = 0;
+      if (bot) {
+        const studentSnap = await db.collection('students').get();
+        const regSnap = await db.collection('registrations').get();
+        const tgIds = new Set<number | string>();
+
+        studentSnap.docs.forEach((d) => {
+          const tId = d.data().telegramId;
+          if (tId) tgIds.add(tId);
+        });
+
+        regSnap.docs.forEach((d) => {
+          const tId = d.data().telegramId;
+          if (tId) tgIds.add(tId);
+        });
+
+        const broadcastMsg = 
+          `📢 *አዲስ ማስታወቂያ (Announcement)*\n` +
+          `⛪ *መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን*\n` +
+          `═══════════════════════\n\n` +
+          `📌 *${notifDoc.title}*\n\n` +
+          `${notifDoc.message}\n\n` +
+          `═══════════════════════\n` +
+          `✍️ የላከው: *${notifDoc.senderName}*\n` +
+          `⏰ ሰዓት: ${new Date().toLocaleTimeString()}`;
+
+        for (const chatId of tgIds) {
+          try {
+            await bot.sendMessage(chatId, broadcastMsg, { parse_mode: 'Markdown' });
+            sentCount++;
+          } catch (_) {}
+        }
+      }
+
+      res.json({
+        success: true,
+        sentToTelegram: sentCount,
+        message: 'Notification dispatched to mobile apps and Telegram students.',
+      });
+    } catch (err: any) {
+      console.error('Error broadcasting notification:', err);
+      res.status(500).json({ error: 'Failed to broadcast notification' });
+    }
+  });
+
+  // Leave request status update API (Approve/Reject + notify user on Telegram)
+  app.post('/api/leave_requests/:id/status', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status, adminName } = req.body;
+
+      const leaveRef = db.collection('leave_requests').doc(id);
+      const leaveDoc = await leaveRef.get();
+      if (!leaveDoc.exists) return res.status(404).json({ error: 'Leave request not found' });
+
+      const leaveData = leaveDoc.data()!;
+      await leaveRef.update({
+        status,
+        approvedBy: adminName || 'አስተዳዳሪ',
+        updatedAt: new Date().toISOString()
+      });
+
+      if (bot && leaveData.telegramId) {
+        try {
+          const statusAm = status === 'approved' ? '✅ ጸድቋል (Approved)' : '❌ አልተቀበለም (Rejected)';
+          console.log(`Sending leave status notification to ${leaveData.telegramId}`);
+          await bot.sendMessage(
+            leaveData.telegramId,
+            `✉️ *የፈቃድ ጥያቄ ምላሽ (Leave Request Update)*\n` +
+            `⛪ መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን\n` +
+            `═══════════════════════\n\n` +
+            `• *የፈቃድ ዓይነት:* ${leaveData.leaveType || 'ፈቃድ'}\n` +
+            `• *ወቅት/ጊዜ:* ${leaveData.duration || 'N/A'}\n` +
+            `• *አሁን ያለው ሁኔታ (Status):* *${statusAm}*\n` +
+            `• *የወሰነው:* ${adminName || 'አስተዳዳሪ'}\n\n` +
+            `ትኩረትዎ እናመሰግናለን!`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (tgErr) {
+          console.error('Failed to notify student on Telegram for leave request:', tgErr);
+        }
+      } else {
+        console.warn(`Cannot send leave notification. Bot: ${!!bot}, TelegramId: ${leaveData.telegramId}`);
+      }
+
+      res.json({ success: true, message: 'Leave request status updated and student notified.' });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update leave request status' });
+    }
+  });
+
+  // Support ticket status update API (Resolve/Update + notify user on Telegram)
+  app.post('/api/support_tickets/:id/status', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status, adminName } = req.body;
+
+      const ticketRef = db.collection('support_tickets').doc(id);
+      const ticketDoc = await ticketRef.get();
+      if (!ticketDoc.exists) return res.status(404).json({ error: 'Support ticket not found' });
+
+      const ticketData = ticketDoc.data()!;
+      await ticketRef.update({
+        status,
+        updatedAt: new Date().toISOString()
+      });
+
+      if (bot && ticketData.telegramId) {
+        try {
+          const statusAm = status === 'resolved' ? '✅ ተፈትቷል (Resolved)' : status === 'in_contact' ? '📞 በሂደት ላይ (In Progress)' : '📌 ታይቷል (Updated)';
+          console.log(`Sending support ticket notification to ${ticketData.telegramId}`);
+          await bot.sendMessage(
+            ticketData.telegramId,
+            `💬 *የድጋፍ ጥያቄ ምላሽ (Support Ticket Update)*\n` +
+            `⛪ መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን\n` +
+            `═══════════════════════\n\n` +
+            `• *ቲኬት ቁጥር:* \`${ticketData.ticketNumber || id}\`\n` +
+            `• *ርዕስ/ጉዳይ:* ${ticketData.title || ticketData.category}\n` +
+            `• *አሁን ያለው ሁኔታ (Status):* *${statusAm}*\n` +
+            `• *አስተዳዳሪ:* ${adminName || 'አስተዳዳሪ'}\n\n` +
+            `ጥያቄዎ ትኩረት አግኝቷል!`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (tgErr) {
+          console.error('Failed to notify student on Telegram for support ticket:', tgErr);
+        }
+      } else {
+        console.warn(`Cannot send support notification. Bot: ${!!bot}, TelegramId: ${ticketData.telegramId}`);
+      }
+
+      res.json({ success: true, message: 'Support ticket status updated and student notified.' });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update support ticket status' });
+    }
+  });
+
+  // Support ticket note/reply API (Add note + notify requester on Telegram)
+  app.post('/api/support_tickets/:id/note', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { author, text } = req.body;
+
+      const ticketRef = db.collection('support_tickets').doc(id);
+      const ticketDoc = await ticketRef.get();
+      if (!ticketDoc.exists) return res.status(404).json({ error: 'Support ticket not found' });
+
+      const ticketData = ticketDoc.data()!;
+      const currentNotes = ticketData.notes || [];
+      const newNote = {
+        id: `n-${Date.now()}`,
+        author: author || 'አስተባባሪ',
+        text: text,
+        date: new Date().toISOString().replace('T', ' ').slice(0, 16),
+      };
+
+      await ticketRef.update({
+        notes: [...currentNotes, newNote],
+        updatedAt: new Date().toISOString()
+      });
+
+      if (bot && ticketData.telegramId) {
+        try {
+          await bot.sendMessage(
+            ticketData.telegramId,
+            `💬 *የድጋፍ ጥያቄ ምላሽ (Support Desk Response)*\n` +
+            `⛪ መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን\n` +
+            `═══════════════════════\n\n` +
+            `• *ቲኬት ቁጥር:* \`${ticketData.ticketNumber || id}\`\n` +
+            `• *ርዕስ/ጉዳይ:* ${ticketData.title || ticketData.category}\n\n` +
+            `✍️ *ከአስተዳዳሪው የተላከ ምላሽ (Admin Reply):*\n` +
+            `"${text}"\n\n` +
+            `⏰ *ሰዓት:* ${newNote.date}`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (tgErr) {
+          console.error('Failed to notify student on Telegram for support note:', tgErr);
+        }
+      }
+
+      res.json({ success: true, message: 'Support ticket note added and student notified.' });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to add support ticket note' });
+    }
+  });
+
+  app.delete('/api/leave_requests/:id', async (req, res) => {
+    try {
+      await deleteDoc(doc(db as any, 'leave_requests', req.params.id));
+      res.json({ success: true, message: 'Leave request deleted.' });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to delete leave request' });
+    }
+  });
+
+  app.delete('/api/support_tickets/:id', async (req, res) => {
+    try {
+      await deleteDoc(doc(db as any, 'support_tickets', req.params.id));
+      res.json({ success: true, message: 'Support ticket deleted.' });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to delete support ticket' });
+    }
+  });
+
+  // Initialize Vite middleware for frontend development with HMR disabled to prevent port 24678 conflicts
+  const vite = await createViteServer({
+    server: {
+      middlewareMode: true,
+      hmr: false,
+    },
+    appType: 'spa',
+  });
+  app.use(vite.middlewares);
+
+  // Keep-alive mechanism to prevent the server from sleeping
+  setInterval(async () => {
+    try {
+      const response = await fetch('http://localhost:3000/api/health');
+      const data = await response.json();
+      console.log('Keep-alive ping:', data.timestamp);
+    } catch (error) {
+      console.error('Keep-alive ping failed:', error);
+    }
+  }, 5 * 60 * 1000); // 5 minutes
+
+  const PORT = 3000;
+  
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Full-stack server running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer();
