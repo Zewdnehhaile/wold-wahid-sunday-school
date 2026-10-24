@@ -52,14 +52,50 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
   lang,
   currentAdmin,
 }) => {
-  const [codeQuery, setCodeQuery] = useState('');
-  const [scanErrorMessage, setScanErrorMessage] = useState('');
-  const [lastCheckedInMember, setLastCheckedInMember] = useState<{
-    member: Member | { fullNameAm: string; fullNameEn: string; code: string; photoUrl?: string };
-    timestamp: string;
-    isDuplicate?: boolean;
-    isGuest?: boolean;
-  } | null>(null);
+  const [toast, setToast] = useState<{ name: string; code: string } | null>(null);
+
+  // ... (inside handleProcessCode)
+    onCheckIn(newRecord);
+    setToast({ name: member.fullNameAm || member.fullNameEn, code: member.code });
+    setTimeout(() => setToast(null), 3000);
+    playChime();
+    setCodeQuery('');
+  };
+
+  // ... (in JSX return)
+      {/* Toast Pop-up */}
+      {toast && (
+        <div className="fixed top-20 left-4 right-4 z-50 p-6 bg-emerald-500 border-4 border-white rounded-3xl shadow-2xl text-center text-slate-950 animate-bounce">
+          <h2 className="text-2xl font-black">{toast.name}</h2>
+          <p className="font-mono font-bold mt-1">{toast.code}</p>
+          <p className="text-sm mt-2">✅ ተመዝግበዋል / Present</p>
+        </div>
+      )}
+
+      {/* ... (in table rows) */}
+                      <div className="flex flex-col items-end shrink-0 gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-semibold text-emerald-200">
+                            🇪🇹 {formatEthiopianDate(record.date)}
+                          </span>
+                          <select 
+                            value={record.status} 
+                            onChange={(e) => onUpdateAttendance?.(record.id, { status: e.target.value as any })}
+                            className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${
+                              record.status === 'absent' ? 'bg-rose-500/20 text-rose-300 border-rose-500/30' :
+                              record.status === 'excused' ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' :
+                              'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                            }`}
+                          >
+                            <option value="present">🟢 ተገኝቷል</option>
+                            <option value="absent">🔴 ቀርቷል</option>
+                            <option value="excused">🟡 ፈቃድ</option>
+                          </select>
+                        </div>
+                        <span className="font-mono text-[10px] text-amber-300/90">
+                          ⏰ {record.timestamp}
+                        </span>
+                      </div>
 
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isKioskMode, setIsKioskMode] = useState(false);
@@ -395,13 +431,6 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
           </div>
         </div>
         <div className="lg:col-span-7 space-y-4">
-          {/* Greeting Box */}
-          {lastCheckedInMember && (
-            <div id="greeting-box" className={`p-5 rounded-3xl border-2 transition-all shadow-2xl ${lastCheckedInMember.isDuplicate ? 'bg-amber-950/40 border-amber-500/70 text-amber-100' : 'bg-emerald-950/70 border-emerald-500 text-emerald-100'}`}>
-              <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight leading-tight">{lastCheckedInMember.member.fullNameAm || (lastCheckedInMember.member as any).fullNameEn}</h2>
-            </div>
-          )}
-
           {/* Recent Check-Ins List */}
           <div className="bg-[#09351c] border border-[#0f4425] rounded-2xl p-5 shadow-xl">
             <h3 className="text-sm font-bold text-white mb-3 flex items-center justify-between pb-2 border-b border-[#0f4425]">
@@ -430,6 +459,20 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
                         <p className="text-[11px] font-mono text-amber-400">{record.memberCode}</p>
                       </div>
                     </div>
+                    {/* Status Override */}
+                    <select 
+                      value={record.status} 
+                      onChange={(e) => onUpdateAttendance?.(record.id, { status: e.target.value as any })}
+                      className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${
+                        record.status === 'absent' ? 'bg-rose-500/20 text-rose-300 border-rose-500/30' :
+                        record.status === 'excused' ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' :
+                        'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                      }`}
+                    >
+                      <option value="present">🟢 ተገኝቷል</option>
+                      <option value="absent">🔴 ቀርቷል</option>
+                      <option value="excused">🟡 ፈቃድ</option>
+                    </select>
                   </div>
                 ))
               )}
