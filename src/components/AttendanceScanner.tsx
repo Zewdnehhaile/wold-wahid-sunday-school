@@ -295,12 +295,14 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
                 !attendance.some(a => a.memberId === m.id && a.sessionName === activeSession.nameAm)
               );
               
-              if (absentees.length === 0) {
-                alert('ሁሉም ተማሪዎች ተገኝተዋል!');
+              const targetIds = absentees.map(m => m.telegramId).filter(Boolean);
+              
+              if (targetIds.length === 0) {
+                alert('ከተቀሩት ተማሪዎች መካከል የቴሌግራም አካውንታቸው የተገናኘ ተማሪ አልተገኘም (No linked Telegram accounts found).');
                 return;
               }
 
-              if (confirm(`${absentees.length} ተማሪዎች ዛሬ አልተገኙም። መንፈሳዊ የማሳሰቢያ መልእክት ለሁሉም መላክ ይፈልጋሉ?`)) {
+              if (confirm(`${absentees.length} ተማሪዎች ዛሬ አልተገኙም። መንፈሳዊ የማሳሰቢያ መልእክት ለ ${targetIds.length} ተማሪዎች መላክ ይፈልጋሉ?`)) {
                 try {
                   const res = await fetch('/api/notifications/broadcast', {
                     method: 'POST',
@@ -309,7 +311,7 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
                       title: 'የዛሬው መርሐ ግብር ናፍቆት',
                       message: `ሰላም ለኪ/ለከ ይሁን! ✝️\n\nዛሬ በ"${activeSession.nameAm}" መርሐ ግብራችን ላይ ስላልተገኙ ትምህርቱም ሆነ በረከቱ ጎድሎብናልና አዝነናል።\n\nምናልባትም በምክንያት ከሆነ የፈቃድ መጠየቂያ በቦቱ በኩል እንዲልኩ እናሳስባለን።\n\nየእግዚአብሔር ጸጋና ሰላም ከእርስዎ ጋር ይሁን።`,
                       senderName: currentAdmin?.nameAm || 'አስተዳዳሪ',
-                      targetIds: absentees.map(m => m.telegramId).filter(Boolean)
+                      targetIds: targetIds
                     }),
                   });
                   const data = await res.json();

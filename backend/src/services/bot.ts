@@ -1130,6 +1130,8 @@ export async function handleTelegramUpdate(update: any) {
         if (msg.photo && msg.photo.length > 0) {
           const largestPhoto = msg.photo[msg.photo.length - 1];
           photoVal = `tg_file:${largestPhoto.file_id}`;
+        } else if (msg.document && msg.document.mime_type?.startsWith('image/')) {
+          photoVal = `tg_file:${msg.document.file_id}`;
         }
         session.data.photo = photoVal && photoVal !== 'None' ? photoVal : '';
 

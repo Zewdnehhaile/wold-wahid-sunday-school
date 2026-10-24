@@ -146,13 +146,14 @@ async function startServer() {
         const { targetIds } = req.body;
         let tgIds = new Set<number | string>();
 
-        if (targetIds && Array.isArray(targetIds) && targetIds.length > 0) {
-          targetIds.forEach(id => tgIds.add(id));
+        if (targetIds && Array.isArray(targetIds)) {
+          const validIds = targetIds.filter(id => id && (typeof id === 'string' || typeof id === 'number'));
+          validIds.forEach(id => tgIds.add(id));
         } else {
           const studentSnap = await db.collection('students').get();
           const regSnap = await db.collection('registrations').get();
 
-          console.log(`📣 Broadcasting: Found ${studentSnap.size} students and ${regSnap.size} registrations.`);
+          console.log(`📣 Broadcasting to everyone: Found ${studentSnap.size} students and ${regSnap.size} registrations.`);
           studentSnap.docs.forEach((d) => {
             const tId = d.data().telegramId;
             if (tId) tgIds.add(tId);
@@ -163,7 +164,7 @@ async function startServer() {
             if (tId) tgIds.add(tId);
           });
         }
-        console.log(`📣 Unique Telegram IDs collected: ${tgIds.size}`);
+        console.log(`📣 Final set of unique Telegram IDs: ${tgIds.size}`);
 
         const broadcastMsg = 
           `📢 *አዲስ ማስታወቂያ (Announcement)*\n` +
@@ -339,18 +340,20 @@ async function startServer() {
 
   app.delete('/api/leave_requests/:id', async (req, res) => {
     try {
-      await deleteDoc(doc(db as any, 'leave_requests', req.params.id));
+      await db.collection('leave_requests').doc(req.params.id).delete();
       res.json({ success: true, message: 'Leave request deleted.' });
     } catch (error) {
+      console.error('Delete leave request error:', error);
       res.status(500).json({ error: 'Failed to delete leave request' });
     }
   });
 
   app.delete('/api/support_tickets/:id', async (req, res) => {
     try {
-      await deleteDoc(doc(db as any, 'support_tickets', req.params.id));
+      await db.collection('support_tickets').doc(req.params.id).delete();
       res.json({ success: true, message: 'Support ticket deleted.' });
     } catch (error) {
+      console.error('Delete support ticket error:', error);
       res.status(500).json({ error: 'Failed to delete support ticket' });
     }
   });
