@@ -198,6 +198,18 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
       timestamp: currentTime,
       isDuplicate: false,
     });
+    
+    // Add visual feedback (flash green)
+    const greetingBox = document.getElementById('greeting-box');
+    if (greetingBox) {
+      greetingBox.classList.remove('bg-emerald-950/70', 'border-emerald-500');
+      greetingBox.classList.add('bg-emerald-500', 'border-white');
+      setTimeout(() => {
+        greetingBox.classList.remove('bg-emerald-500', 'border-white');
+        greetingBox.classList.add('bg-emerald-950/70', 'border-emerald-500');
+      }, 500);
+    }
+    
     playChime();
     setCodeQuery('');
   };
@@ -383,11 +395,46 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
           </div>
         </div>
         <div className="lg:col-span-7 space-y-4">
+          {/* Greeting Box */}
           {lastCheckedInMember && (
-            <div className={`p-5 rounded-3xl border-2 transition-all shadow-2xl ${lastCheckedInMember.isDuplicate ? 'bg-amber-950/40 border-amber-500/70 text-amber-100' : 'bg-emerald-950/70 border-emerald-500 text-emerald-100'}`}>
+            <div id="greeting-box" className={`p-5 rounded-3xl border-2 transition-all shadow-2xl ${lastCheckedInMember.isDuplicate ? 'bg-amber-950/40 border-amber-500/70 text-amber-100' : 'bg-emerald-950/70 border-emerald-500 text-emerald-100'}`}>
               <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight leading-tight">{lastCheckedInMember.member.fullNameAm || (lastCheckedInMember.member as any).fullNameEn}</h2>
             </div>
           )}
+
+          {/* Recent Check-Ins List */}
+          <div className="bg-[#09351c] border border-[#0f4425] rounded-2xl p-5 shadow-xl">
+            <h3 className="text-sm font-bold text-white mb-3 flex items-center justify-between pb-2 border-b border-[#0f4425]">
+              <span className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-amber-400" />
+                <span>{dict.attendance.recentCheckins}</span>
+              </span>
+              <span className="text-xs font-mono text-amber-400 bg-[#062414] px-2.5 py-0.5 rounded-lg border border-[#0f4425]">
+                {attendance.length} ተመዝግበዋል
+              </span>
+            </h3>
+            <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+              {attendance.length === 0 ? (
+                <div className="py-12 text-center text-emerald-200/50 text-xs">
+                  {lang === 'am' ? 'እስካሁን የተመዘገበ የመገኘት ታሪክ የለም።' : 'No check-ins recorded yet.'}
+                </div>
+              ) : (
+                attendance.map((record) => (
+                  <div key={record.id} className="p-3 rounded-xl bg-[#062414] border border-[#0f4425] flex items-center justify-between gap-3 text-xs hover:border-amber-500/40 transition-colors">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center shrink-0">
+                        <UserCheck className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-bold text-white truncate">{record.memberNameAm || record.memberNameEn}</p>
+                        <p className="text-[11px] font-mono text-amber-400">{record.memberCode}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
