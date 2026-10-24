@@ -478,11 +478,18 @@ export default function App() {
       );
 
       await addDoc(collection(db, 'attendance'), {
-        ...record,
-        phone: matchingStudent?.phone || '',
-        telegramId: matchingStudent?.telegramUsername || '',
+        memberId: record.memberId,
+        memberNameAm: record.memberNameAm || matchingStudent?.fullNameAm || 'Student',
+        memberNameEn: record.memberNameEn || matchingStudent?.fullNameEn || 'Student',
+        memberCode: record.memberCode || matchingStudent?.code || '',
+        department: record.department || matchingStudent?.department || 'education',
+        sessionName: record.sessionName || activeSession.nameAm,
         timestamp: record.timestamp || new Date().toLocaleTimeString(),
         date: record.date || new Date().toISOString().split('T')[0],
+        method: record.method || 'qr',
+        status: record.status || 'present',
+        phone: matchingStudent?.phone || '',
+        telegramId: matchingStudent?.telegramUsername || '',
       });
     } catch (e) {
       console.error('Check-in failed:', e);
