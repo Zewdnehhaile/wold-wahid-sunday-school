@@ -35,6 +35,7 @@ interface SupportDeskProps {
   onUpdateTicketStatus: (ticketId: string, status: SupportStatus) => void;
   onDeleteTicket: (ticketId: string) => void;
   onDeleteLeaveRequest: (requestId: string) => void;
+  onUpdateLeaveRequestStatus?: (requestId: string, status: 'approved' | 'rejected', reason: string) => void;
   onAddNote: (ticketId: string, author: string, text: string) => void;
   onUpdateAttendance?: (id: string, updated: Partial<AttendanceRecord>) => void;
   lang: Language;
@@ -49,6 +50,7 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
   onUpdateTicketStatus,
   onDeleteTicket,
   onDeleteLeaveRequest,
+  onUpdateLeaveRequestStatus,
   onAddNote,
   onUpdateAttendance,
   lang,
@@ -60,6 +62,11 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [newNoteText, setNewNoteText] = useState('');
   const [searchAbsenceQuery, setSearchAbsenceQuery] = useState('');
+
+  // Leave action state
+  const [selectedLeaveForAction, setSelectedLeaveForAction] = useState<LeaveRequest | null>(null);
+  const [leaveActionType, setLeaveActionType] = useState<'approved' | 'rejected'>('approved');
+  const [leaveActionReason, setLeaveActionReason] = useState('');
 
   // Editing Absence Note state
   const [editingAbsenceRecord, setEditingAbsenceRecord] = useState<AttendanceRecord | null>(null);
@@ -570,42 +577,157 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
           ) : (
             <div className="space-y-2.5">
               {leaveRequests.map((l) => (
-                <div key={l.id} className="p-3.5 bg-[#062414] rounded-xl border border-[#0f4425] flex items-center justify-between gap-3 text-xs">
-                  <div className="space-y-0.5">
+                <div key={l.id} className="p-3.5 bg-[#062414] rounded-xl border border-[#0f4425] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-white text-sm">{l.studentName}</span>
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                         {l.leaveType}
                       </span>
+                      {l.status === 'approved' && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          ✓ ጸድቋል (Approved)
+                        </span>
+                      )}
+                      {l.status === 'rejected' && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                          ✕ አልተቀበለም (Rejected)
+                        </span>
+                      )}
+                      {l.status === 'pending' && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                          ● በመጠባበቅ ላይ (Pending)
+                        </span>
+                      )}
                     </div>
                     <div className="text-[11px] text-emerald-200/80">
                       ⏱️ <strong>ጊዜ:</strong> {l.duration}
                     </div>
                     {l.reason && (
                       <p className="text-[11px] text-slate-300 italic">
-                        "{l.reason}"
+                        <strong>ምክንያት/አስተያየት:</strong> "{l.reason}"
                       </p>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onDeleteLeaveRequest(l.id);
-                      setActionNotice({
-                        message: 'የፈቃድ ጥያቄው ተሰርዟል! (Leave request deleted)',
-                        type: 'success',
-                      });
-                      setTimeout(() => setActionNotice(null), 3000);
-                    }}
-                    className="p-2 rounded-xl text-rose-400 hover:bg-rose-950/60 transition-colors cursor-pointer shrink-0"
-                    title="ሰርዝ (Delete)"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedLeaveForAction(l);
+                        setLeaveActionType('approved');
+                        setLeaveActionReason(l.reason || 'ፈቃድዎ ጸድቋል');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors shadow"
+                      title="አጽድቅ (Approve)"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>አጽድቅ</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedLeaveForAction(l);
+                        setLeaveActionType('rejected');
+                        setLeaveActionReason(l.reason || 'የተጠየቀው ፈቃድ አልተፈቀደም');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-400 text-white font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors shadow"
+                      title="አለመቀበል (Reject)"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      <span>አለመቀበል</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onDeleteLeaveRequest(l.id);
+                        setActionNotice({
+                          message: 'የፈቃድ ጥያቄው ተሰርዟል! (Leave request deleted)',
+                          type: 'success',
+                        });
+                        setTimeout(() => setActionNotice(null), 3000);
+                      }}
+                      className="p-2 rounded-xl text-rose-400 hover:bg-rose-950/60 transition-colors cursor-pointer shrink-0"
+                      title="ሰርዝ (Delete)"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Leave Action Modal (Approve/Reject with Reason) */}
+      {selectedLeaveForAction && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#09351c] border border-[#0f4425] rounded-3xl p-6 w-full max-w-md shadow-2xl relative text-xs">
+            <button
+              onClick={() => setSelectedLeaveForAction(null)}
+              className="absolute top-4 right-4 text-emerald-300 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <h3 className="text-sm font-bold text-white mb-1">
+              {leaveActionType === 'approved' ? '✅ የፈቃድ ጥያቄ ማጽደቂያ' : '❌ የፈቃድ ጥያቄ አለመቀበያ'}
+            </h3>
+            <p className="text-xs text-amber-300 font-mono mb-4">
+              ተማሪ: {selectedLeaveForAction.studentName} ({selectedLeaveForAction.leaveType})
+            </p>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (onUpdateLeaveRequestStatus) {
+                  onUpdateLeaveRequestStatus(selectedLeaveForAction.id, leaveActionType, leaveActionReason.trim());
+                }
+                setSelectedLeaveForAction(null);
+                setActionNotice({
+                  message: leaveActionType === 'approved' ? 'የፈቃድ ጥያቄው ጸድቆ ለተማሪው ተልኳል!' : 'የፈቃድ ጥያቄው ውድቅ ሆኖ ለተማሪው ተልኳል!',
+                  type: 'success',
+                });
+                setTimeout(() => setActionNotice(null), 4000);
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="block text-emerald-200/80 font-semibold mb-1">
+                  ምክንያት ወይም አስተያየት ለተማሪው (Reason / Comment) *
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={leaveActionReason}
+                  onChange={(e) => setLeaveActionReason(e.target.value)}
+                  placeholder="ምሳሌ: ፈቃድዎ በሰንበት ት/ቤት ተፈቅዷል..."
+                  className="w-full px-3.5 py-2.5 bg-[#062414] border border-[#0f4425] rounded-xl text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#0f4425]">
+                <button
+                  type="button"
+                  onClick={() => setSelectedLeaveForAction(null)}
+                  className="px-3 py-1.5 text-emerald-200/70 hover:text-white"
+                >
+                  ይቅር (Cancel)
+                </button>
+                <button
+                  type="submit"
+                  className={`px-5 py-2 font-bold rounded-xl shadow cursor-pointer text-slate-950 ${
+                    leaveActionType === 'approved' ? 'bg-emerald-500 hover:bg-emerald-400' : 'bg-rose-500 hover:bg-rose-400 text-white'
+                  }`}
+                >
+                  {leaveActionType === 'approved' ? 'አጽድቅና ላክ (Approve)' : 'ውድቅ አድርግና ላክ (Reject)'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
