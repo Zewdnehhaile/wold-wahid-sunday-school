@@ -59,7 +59,7 @@ export default function App() {
     window.location.search.includes('woldwahidsundayschool') ||
     /Telegram/i.test(navigator.userAgent)
   );
-  const [hasEnteredApp, setHasEnteredApp] = useState(true);
+  const [hasEnteredApp, setHasEnteredApp] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState('members');
   const [showStudentPortal, setShowStudentPortal] = useState(false);
