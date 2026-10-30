@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Wold Wahid Sunday School",
+    "slug": "wold-wahid-sunday-school",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./mobile/assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./mobile/assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#090d16"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "org.woldwahid.sundayschool"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./mobile/assets/adaptive-icon.png",
+        "backgroundColor": "#090d16"
+      },
+      "package": "org.woldwahid.sundayschool",
+      "permissions": [
+        "CAMERA"
+      ]
+    },
+    "web": {
+      "favicon": "./mobile/assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "c443949c-ec30-4872-81fb-203ca341cc54"
+      }
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableProguardInReleaseBuilds": false,
+            "enableShrinkResourcesInReleaseBuilds": false,
+            "useLegacyPackaging": true
+          }
+        }
+      ]
+    ]
+  }
+}
