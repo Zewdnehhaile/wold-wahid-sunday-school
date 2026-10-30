@@ -428,7 +428,7 @@ export default function App() {
       }
 
       setApprovalBanner({
-        message: `ተማሪ "${studentName}" በመታወቂያ ቁጥር "${manualStudentId}" በተሳካ ሁኔታ ጸድቋል! ወደ ጸደቁ ተማሪዎች ዝርዝር ተላልፏል።`,
+        message: `ተማሪ "${studentName}" በመታወቂያ ቁጥር "${manualStudentId}" በተሳካ ሁኔታ ጸድቋል!`,
         type: 'success',
       });
       setTimeout(() => setApprovalBanner(null), 7000);
@@ -620,7 +620,7 @@ export default function App() {
         updatedAt: new Date().toISOString(),
       }).catch(console.error);
 
-      // Targeted notification for requester (broadcast-style direct delivery)
+      // Targeted notification for requester
       await addDoc(collection(db, 'notifications'), {
         title: `💬 ለድጋፍ ጥያቄዎ (${ticket.ticketNumber || ticketId}) ምላሽ ተሰጥቷል`,
         message: `ከ${author || 'አስተዳዳሪ'}: "${text}"`,
@@ -633,12 +633,6 @@ export default function App() {
         createdAt: new Date().toISOString(),
         isDirectReply: true,
       }).catch(console.error);
-
-      await apiFetch(`/api/support_tickets/${ticketId}/note`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ author, text }),
-      }).catch((e) => console.warn('Support ticket note API notice:', e));
     } catch (e) {
       console.error('Add note failed:', e);
     }

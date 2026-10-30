@@ -123,6 +123,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onOpenStudentPort
 
         {/* Clean Login Form */}
         <form onSubmit={handleSubmit} className="space-y-5">
+          <button
+            type="button"
+            onClick={() => window.history.back()}
+            className="text-[10px] font-bold text-emerald-400 hover:text-white flex items-center gap-1 mb-4 cursor-pointer"
+          >
+            ← ተመለስ (Back)
+          </button>
           <div>
             <label className="text-[10px] font-bold text-amber-400/80 uppercase tracking-widest block mb-2 ml-1">
               ስልክ ቁጥር (Phone Number)
