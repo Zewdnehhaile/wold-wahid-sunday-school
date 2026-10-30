@@ -197,7 +197,15 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
         submittedAt: new Date().toISOString(),
       });
 
-      setLeaveSuccessMsg('✅ የፈቃድ መጠየቂያዎ ተልኳል! አስተዳዳሪው ሲመለከተው መልእክት ይደርስዎታል።');
+      setLeaveSuccessMsg(
+`✅ የፈቃድ ጥያቄዎ ተመዝግቧል!
+Leave Request Submitted!
+
+📋 Request #: LV-${Math.floor(1000 + Math.random() * 9000)}
+⏳ Status: በመጠባበቅ ላይ (Pending Review)
+
+የክፍል ኃላፊዎ ጥያቄዎን መርምረው ውሳኔውን ያሳውቁዎታል።`
+      );
       setLeaveReason('');
       setLeaveDuration('');
       setTimeout(() => setLeaveSuccessMsg(''), 8000);
