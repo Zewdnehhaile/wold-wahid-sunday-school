@@ -39,6 +39,12 @@ export interface AdminPermission {
   canAccessSupport: boolean;
   canAccessAdmins: boolean;
   canAccessAnalytics: boolean;
+  canBroadcast?: boolean;
+  // Legacy aliases
+  takeAttendance?: boolean;
+  approveStudents?: boolean;
+  manageSupport?: boolean;
+  exportReports?: boolean;
 }
 
 export interface AdminUser {

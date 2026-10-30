@@ -356,21 +356,15 @@ export default function App() {
 
   // Granular Nav Tab Permissions based on current admin's role and permission checkboxes
   const isSuperAdmin = currentAdmin.role === 'super_admin';
-  const perms = currentAdmin.permissions || {
-    canAccessSchedule: true,
-    canAccessMembers: true,
-    canAccessAttendance: true,
-    canAccessSupport: true,
-    canAccessAdmins: isSuperAdmin,
-    canAccessAnalytics: isSuperAdmin,
-  };
+  const perms = (currentAdmin.permissions || {}) as any;
 
-  const canSchedule = isSuperAdmin || perms.canAccessSchedule;
-  const canMembers = isSuperAdmin || perms.canAccessMembers;
-  const canAttendance = isSuperAdmin || perms.canAccessAttendance;
-  const canSupport = isSuperAdmin || perms.canAccessSupport;
-  const canAdmins = isSuperAdmin || perms.canAccessAdmins;
-  const canAnalytics = isSuperAdmin || perms.canAccessAnalytics;
+  const canSchedule = isSuperAdmin || Boolean(perms.canAccessSchedule);
+  const canMembers = isSuperAdmin || Boolean(perms.canAccessMembers ?? perms.approveStudents);
+  const canAttendance = isSuperAdmin || Boolean(perms.canAccessAttendance ?? perms.takeAttendance);
+  const canSupport = isSuperAdmin || Boolean(perms.canAccessSupport ?? perms.manageSupport);
+  const canAdmins = isSuperAdmin || Boolean(perms.canAccessAdmins);
+  const canAnalytics = isSuperAdmin || Boolean(perms.canAccessAnalytics ?? perms.exportReports);
+  const canBroadcast = isSuperAdmin || Boolean(perms.canBroadcast);
 
   const allowedNavTabs = [
     { id: 'schedule', label: dict.nav.schedule, mobileLabel: 'መርሐ ግብር', icon: Calendar, allowed: canSchedule },
@@ -388,7 +382,7 @@ export default function App() {
         setActiveTab(allowedNavTabs[0].id);
       }
     }
-  }, [isLoggedIn, canSchedule, canMembers, canAttendance, canSupport, canAdmins, canAnalytics]);
+  }, [isLoggedIn, activeTab, allowedNavTabs]);
 
   // Real-time synchronization of logged-in admin permissions from Firestore
   useEffect(() => {
@@ -931,29 +925,29 @@ export default function App() {
           }));
           setIsLoggedIn(true);
 
-          const defaultPerms = admin.permissions || {
-            canAccessSchedule: true,
-            canAccessMembers: true,
-            canAccessAttendance: true,
-            canAccessSupport: true,
-            canAccessAdmins: admin.role === 'super_admin',
-            canAccessAnalytics: admin.role === 'super_admin',
-          };
+          const p = admin.permissions || {};
+          const isSuper = admin.role === 'super_admin';
+          const pAttendance = isSuper || Boolean(p.canAccessAttendance ?? p.takeAttendance);
+          const pSchedule = isSuper || Boolean(p.canAccessSchedule);
+          const pMembers = isSuper || Boolean(p.canAccessMembers ?? p.approveStudents);
+          const pSupport = isSuper || Boolean(p.canAccessSupport ?? p.manageSupport);
+          const pAdmins = isSuper || Boolean(p.canAccessAdmins);
+          const pAnalytics = isSuper || Boolean(p.canAccessAnalytics ?? p.exportReports);
 
-          if (admin.role === 'super_admin' || defaultPerms.canAccessAttendance) {
+          if (pAttendance) {
             setActiveTab('attendance');
-          } else if (defaultPerms.canAccessSchedule) {
+          } else if (pSchedule) {
             setActiveTab('schedule');
-          } else if (defaultPerms.canAccessMembers) {
+          } else if (pMembers) {
             setActiveTab('members');
-          } else if (defaultPerms.canAccessSupport) {
+          } else if (pSupport) {
             setActiveTab('support');
-          } else if (defaultPerms.canAccessAdmins) {
+          } else if (pAdmins) {
             setActiveTab('admins');
-          } else if (defaultPerms.canAccessAnalytics) {
+          } else if (pAnalytics) {
             setActiveTab('analytics');
           } else {
-            setActiveTab('schedule');
+            setActiveTab('attendance');
           }
         }}
         onOpenStudentPortal={() => setShowStudentPortal(true)}
@@ -1027,13 +1021,15 @@ export default function App() {
             >
               <KeyRound className="w-5 h-5" />
             </button>
-            <button
-              onClick={() => setIsNotificationModalOpen(true)}
-              className="p-3 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition-all shadow-sm hover:scale-105 active:scale-95"
-              title="ማስታወቂያ ላክ"
-            >
-              <Megaphone className="w-5 h-5" />
-            </button>
+            {canBroadcast && (
+              <button
+                onClick={() => setIsNotificationModalOpen(true)}
+                className="p-3 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition-all shadow-sm hover:scale-105 active:scale-95 cursor-pointer"
+                title="ማስታወቂያ ላክ"
+              >
+                <Megaphone className="w-5 h-5" />
+              </button>
+            )}
             <button
               onClick={() => setLang(lang === 'am' ? 'en' : 'am')}
               className="p-3 rounded-2xl bg-[#062414] hover:bg-emerald-900/40 text-slate-200 border border-[#0f4425] transition-all shadow-sm hover:scale-105 active:scale-95"

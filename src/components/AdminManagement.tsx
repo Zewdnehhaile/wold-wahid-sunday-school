@@ -20,6 +20,7 @@ import {
   UserCheck,
   UserX,
   KeyRound,
+  Megaphone,
 } from 'lucide-react';
 import { ChangePasswordModal } from './ChangePasswordModal';
 
@@ -30,6 +31,11 @@ export interface AdminPermission {
   canAccessSupport: boolean;
   canAccessAdmins: boolean;
   canAccessAnalytics: boolean;
+  canBroadcast?: boolean;
+  takeAttendance?: boolean;
+  approveStudents?: boolean;
+  manageSupport?: boolean;
+  exportReports?: boolean;
 }
 
 export interface DetailedAdmin extends AdminUser {
@@ -65,12 +71,13 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
   const [newAdminTelegramId, setNewAdminTelegramId] = useState('');
   const [newAdminDept, setNewAdminDept] = useState<SundaySchoolDepartment>('education');
   const [customRoleTitle, setCustomRoleTitle] = useState('የትምህርት ክፍል አስተባባሪ');
-  const [permSchedule, setPermSchedule] = useState(true);
-  const [permMembers, setPermMembers] = useState(true);
+  const [permSchedule, setPermSchedule] = useState(false);
+  const [permMembers, setPermMembers] = useState(false);
   const [permAttendance, setPermAttendance] = useState(true);
-  const [permSupport, setPermSupport] = useState(true);
+  const [permSupport, setPermSupport] = useState(false);
   const [permAdmins, setPermAdmins] = useState(false);
   const [permAnalytics, setPermAnalytics] = useState(false);
+  const [permBroadcast, setPermBroadcast] = useState(false);
 
   // Real-time Firestore synchronization for administrators from live database
   useEffect(() => {
@@ -79,6 +86,23 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
       (snap) => {
         const loaded: DetailedAdmin[] = snap.docs.map((docSnap) => {
           const d = docSnap.data();
+          const p = d.permissions || {};
+          const isSuper = d.role === 'super_admin';
+
+          const resolvedPerms: AdminPermission = {
+            canAccessSchedule: isSuper ? true : Boolean(p.canAccessSchedule),
+            canAccessMembers: isSuper ? true : Boolean(p.canAccessMembers ?? p.approveStudents),
+            canAccessAttendance: isSuper ? true : Boolean(p.canAccessAttendance ?? p.takeAttendance),
+            canAccessSupport: isSuper ? true : Boolean(p.canAccessSupport ?? p.manageSupport),
+            canAccessAdmins: isSuper ? true : Boolean(p.canAccessAdmins),
+            canAccessAnalytics: isSuper ? true : Boolean(p.canAccessAnalytics ?? p.exportReports),
+            canBroadcast: isSuper ? true : Boolean(p.canBroadcast),
+            takeAttendance: isSuper ? true : Boolean(p.canAccessAttendance ?? p.takeAttendance),
+            approveStudents: isSuper ? true : Boolean(p.canAccessMembers ?? p.approveStudents),
+            manageSupport: isSuper ? true : Boolean(p.canAccessSupport ?? p.manageSupport),
+            exportReports: isSuper ? true : Boolean(p.canAccessAnalytics ?? p.exportReports),
+          };
+
           return {
             id: docSnap.id,
             nameAm: d.nameAm || '',
@@ -91,14 +115,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
             password: d.password || '',
             status: (d.status === 'suspended' ? 'suspended' : 'active') as 'active' | 'suspended',
             avatarUrl: d.avatarUrl || AVATAR_MALE,
-            permissions: d.permissions || {
-              canAccessSchedule: true,
-              canAccessMembers: true,
-              canAccessAttendance: true,
-              canAccessSupport: true,
-              canAccessAdmins: d.role === 'super_admin',
-              canAccessAnalytics: d.role === 'super_admin',
-            },
+            permissions: resolvedPerms,
           };
         });
 
@@ -151,6 +168,11 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
         canAccessSupport: assignedRole === 'super_admin' ? true : permSupport,
         canAccessAdmins: assignedRole === 'super_admin' ? true : permAdmins,
         canAccessAnalytics: assignedRole === 'super_admin' ? true : permAnalytics,
+        canBroadcast: assignedRole === 'super_admin' ? true : permBroadcast,
+        takeAttendance: assignedRole === 'super_admin' ? true : permAttendance,
+        approveStudents: assignedRole === 'super_admin' ? true : permMembers,
+        manageSupport: assignedRole === 'super_admin' ? true : permSupport,
+        exportReports: assignedRole === 'super_admin' ? true : permAnalytics,
       },
     };
 
@@ -182,6 +204,13 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
       setNewAdminRole('admin');
       setNewAdminTelegramId('');
       setCustomRoleTitle('የትምህርት ክፍል አስተባባሪ');
+      setPermSchedule(false);
+      setPermMembers(false);
+      setPermAttendance(true);
+      setPermSupport(false);
+      setPermAdmins(false);
+      setPermAnalytics(false);
+      setPermBroadcast(false);
     } catch (err: any) {
       console.error('Failed to create admin:', err);
       setActionNotice({
@@ -197,14 +226,27 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
     if (!editingAdmin) return;
 
     try {
-      await setDoc(doc(db, 'admins', editingAdmin.id), editingAdmin, { merge: true });
+      const permsToSave = {
+        ...editingAdmin.permissions,
+        takeAttendance: editingAdmin.permissions.canAccessAttendance,
+        approveStudents: editingAdmin.permissions.canAccessMembers,
+        manageSupport: editingAdmin.permissions.canAccessSupport,
+        exportReports: editingAdmin.permissions.canAccessAnalytics,
+      };
+
+      const updatedToSave = {
+        ...editingAdmin,
+        permissions: permsToSave,
+      };
+
+      await setDoc(doc(db, 'admins', editingAdmin.id), updatedToSave, { merge: true });
 
       setAdminsList((prev) =>
-        prev.map((adm) => (adm.id === editingAdmin.id ? editingAdmin : adm))
+        prev.map((adm) => (adm.id === editingAdmin.id ? updatedToSave : adm))
       );
 
       setActionNotice({
-        message: `የ"${editingAdmin.nameAm}" መረጃና የይለፍ ቃል በተሳካ ሁኔታ ተስተካክሏል!`,
+        message: `የ"${editingAdmin.nameAm}" መረጃና ፈቃዶች በተሳካ ሁኔታ ተስተካክሏል!`,
         type: 'success',
       });
       setTimeout(() => setActionNotice(null), 5000);
@@ -223,21 +265,25 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
     const target = adminsList.find((a) => a.id === adminId);
     if (!target || target.role === 'super_admin') return;
 
-    const defaultPerms: AdminPermission = {
-      canAccessSchedule: true,
-      canAccessMembers: true,
-      canAccessAttendance: true,
-      canAccessSupport: true,
-      canAccessAdmins: false,
-      canAccessAnalytics: false,
+    const currentPerms: AdminPermission = {
+      canAccessSchedule: Boolean(target.permissions?.canAccessSchedule),
+      canAccessMembers: Boolean(target.permissions?.canAccessMembers ?? target.permissions?.approveStudents),
+      canAccessAttendance: Boolean(target.permissions?.canAccessAttendance ?? target.permissions?.takeAttendance),
+      canAccessSupport: Boolean(target.permissions?.canAccessSupport ?? target.permissions?.manageSupport),
+      canAccessAdmins: Boolean(target.permissions?.canAccessAdmins),
+      canAccessAnalytics: Boolean(target.permissions?.canAccessAnalytics ?? target.permissions?.exportReports),
+      canBroadcast: Boolean(target.permissions?.canBroadcast),
     };
 
-    const currentPerms = target.permissions || defaultPerms;
     const newPerms: AdminPermission = {
-      ...defaultPerms,
       ...currentPerms,
       [permKey]: !currentPerms[permKey],
     };
+
+    newPerms.takeAttendance = newPerms.canAccessAttendance;
+    newPerms.approveStudents = newPerms.canAccessMembers;
+    newPerms.manageSupport = newPerms.canAccessSupport;
+    newPerms.exportReports = newPerms.canAccessAnalytics;
 
     setAdminsList((prev) =>
       prev.map((a) => (a.id === adminId ? { ...a, permissions: newPerms } : a))
@@ -363,12 +409,13 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                 <th className="py-3 px-4">አስተዳዳሪ (Admin)</th>
                 <th className="py-3 px-4">ሚና (Role) & ስልክ</th>
                 <th className="py-3 px-4">ሁኔታ (Status)</th>
-                <th className="py-3 px-4 text-center">መርሐ ግብር</th>
-                <th className="py-3 px-4 text-center">ተማሪዎች</th>
-                <th className="py-3 px-4 text-center">QR ክትትል</th>
-                <th className="py-3 px-4 text-center">ድጋፍ</th>
-                <th className="py-3 px-4 text-center">አድሚኖች</th>
-                <th className="py-3 px-4 text-center">ሪፖርት</th>
+                <th className="py-3 px-3 text-center">መርሐ ግብር</th>
+                <th className="py-3 px-3 text-center">ተማሪዎች</th>
+                <th className="py-3 px-3 text-center">QR ክትትል</th>
+                <th className="py-3 px-3 text-center">ድጋፍ</th>
+                <th className="py-3 px-3 text-center">አድሚኖች</th>
+                <th className="py-3 px-3 text-center">ሪፖርት</th>
+                <th className="py-3 px-3 text-center">ማስታወቂያ</th>
                 <th className="py-3 px-4 text-right">እርምጃዎች</th>
               </tr>
             </thead>
@@ -541,6 +588,21 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                       </button>
                     </td>
 
+                    <td className="py-3 px-3 text-center">
+                      <button
+                        disabled={isSuper}
+                        onClick={() => handleTogglePermission(adm.id, 'canBroadcast')}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          adm.permissions?.canBroadcast
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-[#062414] text-slate-500 border border-[#0f4425]'
+                        } ${isSuper ? 'opacity-80 cursor-default' : 'hover:scale-105 cursor-pointer'}`}
+                        title="ማስታወቂያ መላክ ፈቃድ"
+                      >
+                        {adm.permissions?.canBroadcast ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                      </button>
+                    </td>
+
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         {canChangeThisPassword && (
@@ -594,7 +656,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
               })}
               {visibleAdmins.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                  <td colSpan={10} className="py-12 text-center text-slate-400">
                     <p className="text-sm font-semibold">ምንም የተመዘገበ አድሚን አልተገኘም።</p>
                     <p className="text-xs text-slate-500 mt-1">አዲስ አድሚን ለመመዝገብ ከላይ "አዲስ አስተዳዳሪ ጨምር" የሚለውን ይጫኑ።</p>
                   </td>
@@ -810,6 +872,19 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                     />
                     <span>ሪፖርትና ትንተና</span>
                   </label>
+
+                  <label className="flex items-center gap-2 text-amber-300 font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={permBroadcast}
+                      onChange={(e) => setPermBroadcast(e.target.checked)}
+                      className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
+                    />
+                    <span className="flex items-center gap-1">
+                      <Megaphone className="w-3.5 h-3.5 text-amber-400" />
+                      <span>ማስታወቂያ መላክ (Broadcast)</span>
+                    </span>
+                  </label>
                 </div>
               </div>
 
@@ -1009,6 +1084,22 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                       className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
                     />
                     <span>ሪፖርትና ትንተና</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-amber-300 font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingAdmin.permissions?.canBroadcast ?? false}
+                      onChange={(e) => setEditingAdmin({
+                        ...editingAdmin,
+                        permissions: { ...(editingAdmin.permissions || {}), canBroadcast: e.target.checked } as any
+                      })}
+                      className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
+                    />
+                    <span className="flex items-center gap-1">
+                      <Megaphone className="w-3.5 h-3.5 text-amber-400" />
+                      <span>ማስታወቂያ መላክ (Broadcast)</span>
+                    </span>
                   </label>
                 </div>
               </div>
