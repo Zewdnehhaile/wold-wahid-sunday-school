@@ -169,3 +169,90 @@ export const onLeaveRequestUpdated = functions.firestore
     }
     return null;
   });
+
+// Firestore Trigger: When a support ticket status is updated, notify the student
+export const onSupportTicketUpdated = functions.firestore
+  .document('support_tickets/{ticketId}')
+  .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
+
+    const statusChanged = before.status !== after.status;
+    const notesChanged = JSON.stringify(before.notes || []) !== JSON.stringify(after.notes || []);
+
+    if (statusChanged || notesChanged) {
+      const telegramId = after.telegramId || after.tgId;
+      const studentPhone = after.phone;
+      const studentCode = after.memberCode;
+
+      let recipientTelegramId = telegramId;
+      if (!recipientTelegramId && (studentPhone || studentCode)) {
+        const cleanPhone = (studentPhone || '').replace(/\D/g, '').slice(-9);
+        const [studentSnap, regSnap] = await Promise.all([
+          db.collection('students').get(),
+          db.collection('registrations').get(),
+        ]);
+        const allDocs = [...studentSnap.docs, ...regSnap.docs];
+        for (const d of allDocs) {
+          const dData = d.data();
+          const dPhone = (dData.phone || '').replace(/\D/g, '').slice(-9);
+          const dCode = (dData.code || dData.studentCode || '').trim().toLowerCase();
+          if ((cleanPhone && dPhone === cleanPhone) || (studentCode && dCode === String(studentCode).trim().toLowerCase())) {
+            recipientTelegramId = dData.telegramId || dData.tgId;
+            if (recipientTelegramId) break;
+          }
+        }
+      }
+
+      if (recipientTelegramId) {
+        try {
+          const token = '8611581813:AAHadIUrYIkmVzz90WfvcpTduj-ubCZCL8w';
+          let msgText = '';
+
+          if (notesChanged && after.notes && after.notes.length > (before.notes || []).length) {
+            const latestNote = after.notes[after.notes.length - 1];
+            msgText = 
+              `💬 *የድጋፍ ጥያቄ ምላሽ (Support Desk Response)*\n` +
+              `⛪ መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን\n` +
+              `═══════════════════════\n\n` +
+              `• *ቲኬት ቁጥር:* \`${after.ticketNumber || context.params.ticketId}\`\n` +
+              `• *ርዕስ/ጉዳይ:* ${after.title || after.category}\n\n` +
+              `✍️ *ከአስተዳዳሪው የተላከ ምላሽ (Admin Reply):*\n` +
+              `${latestNote.text}\n\n` +
+              `⏰ *ሰዓት:* ${latestNote.date}\n` +
+              `👤 *መልስ የሰጠው:* ${latestNote.author}\n\n` +
+              `ተጨማሪ ጥያቄ ካለዎት እዚህ መልሰው መጻፍ ይችላሉ።`;
+          } else if (statusChanged) {
+            const statusAm = after.status === 'approved' ? '✅ ጸድቋል (Approved)' : after.status === 'rejected' ? '❌ አልተቀበለም (Rejected)' : after.status === 'resolved' ? '✅ ተፈትቷል (Resolved)' : after.status === 'in_contact' ? '📞 በሂደት ላይ (In Progress)' : '📌 ታይቷል (Updated)';
+            msgText = 
+              `💬 *የድጋፍ ጥያቄ ምላሽ (Support Ticket Update)*\n` +
+              `⛪ መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን\n` +
+              `═══════════════════════\n\n` +
+              `• *ቲኬት ቁጥር:* \`${after.ticketNumber || context.params.ticketId}\`\n` +
+              `• *ርዕስ/ጉዳይ:* ${after.title || after.category}\n` +
+              `• *አሁን ያለው ሁኔታ (Status):* *${statusAm}*\n` +
+              `• *ምክንያት / አስተያየት:* ${after.reason || 'የለም'}\n` +
+              `• *አስተዳዳሪ:* ${after.approvedBy || 'አስተዳዳሪ'}\n\n` +
+              `ጥያቄዎ ትኩረት አግኝቷል!`;
+          }
+
+          if (msgText) {
+            const fetch = (global as any).fetch || require('node-fetch');
+            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: recipientTelegramId,
+                text: msgText,
+                parse_mode: 'Markdown',
+              }),
+            });
+            console.log(`✅ Support ticket notification sent to ${recipientTelegramId}`);
+          }
+        } catch (err) {
+          console.error('Failed to send support ticket notification:', err);
+        }
+      }
+    }
+    return null;
+  });
