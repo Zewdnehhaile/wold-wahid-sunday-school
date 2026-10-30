@@ -413,6 +413,20 @@ export default function App() {
       // Use setDoc with the same ID as the registration to ensure consistency
       await setDoc(doc(db, 'students', memberId), studentData);
 
+      // 3. Call backend approval API to trigger Telegram notification
+      try {
+        await apiFetch(`/api/registrations/${memberId}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studentCode: manualStudentId,
+            approvedBy: currentAdmin.nameAm,
+          }),
+        });
+      } catch (backendErr) {
+        console.warn('Backend approval dispatch warning:', backendErr);
+      }
+
       setApprovalBanner({
         message: `ተማሪ "${studentName}" በመታወቂያ ቁጥር "${manualStudentId}" በተሳካ ሁኔታ ጸድቋል!`,
         type: 'success',

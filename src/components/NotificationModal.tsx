@@ -29,23 +29,34 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
     setResult(null);
 
     try {
-      await addDoc(collection(db, 'notifications'), {
-        title: title.trim() || 'ወልደ ዋሕድ ሰንበት ት/ቤት ማስታወቂያ',
-        message: message.trim(),
-        senderName: adminName || 'አስተዳዳሪ',
-        createdAt: new Date().toISOString(),
-        isBroadcast: true
+      const res = await apiFetch('/api/notifications/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: title.trim() || 'ወልደ ዋሕድ ሰንበት ት/ቤት ማስታወቂያ',
+          message: message.trim(),
+          senderName: adminName || 'አስተዳዳሪ',
+        }),
       });
-      setResult({
-        success: true,
-        text: 'ማስታወቂያው በተሳካ ሁኔታ ተልኳል!',
-      });
-      setTitle('');
-      setMessage('');
-      setTimeout(() => {
-        onClose();
-        setResult(null);
-      }, 2200);
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setResult({
+          success: true,
+          text: `ማስታወቂያው ለሞባይል መተግበሪያዎች እና ለ ${data.sentToTelegram || 0} የቴሌግራም ተማሪዎች በተሳካ ሁኔታ ተልኳል!`,
+        });
+        setTitle('');
+        setMessage('');
+        setTimeout(() => {
+          onClose();
+          setResult(null);
+        }, 2200);
+      } else {
+        setResult({
+          success: false,
+          text: data.error || 'ማስታወቂያውን መላክ አልተቻለም። እባክዎ እንደገና ይሞክሩ።',
+        });
+      }
     } catch (err: any) {
       console.error('Broadcast failed:', err);
       setResult({
