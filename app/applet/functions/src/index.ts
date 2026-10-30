@@ -114,3 +114,58 @@ export const onBroadcastNotification = functions.firestore
     }
     return null;
   });
+
+// Firestore Trigger: When a leave request status is updated, notify the student
+export const onLeaveRequestUpdated = functions.firestore
+  .document('leave_requests/{leaveId}')
+  .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
+
+    if (before.status !== after.status && (after.status === 'approved' || after.status === 'rejected')) {
+      const telegramId = after.telegramId || after.tgId;
+      const studentCode = after.studentCode;
+      const statusAm = after.status === 'approved' ? '✅ ጸድቋል (Approved)' : '❌ አልተቀበለም (Rejected)';
+      const reason = after.reason || (after.status === 'approved' ? 'ፈቃድዎ ጸድቋል' : 'የተጠየቀው ፈቃድ አልተፈቀደም');
+      const adminName = after.approvedBy || 'አስተዳዳሪ';
+
+      let recipientTelegramId = telegramId;
+      if (!recipientTelegramId && studentCode) {
+        const studentSnap = await db.collection('students').where('code', '==', studentCode).get();
+        if (!studentSnap.empty) {
+          recipientTelegramId = studentSnap.docs[0].data().telegramId;
+        }
+      }
+
+      if (recipientTelegramId) {
+        try {
+          const token = '8611581813:AAHadIUrYIkmVzz90WfvcpTduj-ubCZCL8w';
+          const msgText = 
+            `✉️ *የፈቃድ ጥያቄ ምላሽ (Leave Request Update)*\n` +
+            `⛪ መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን\n` +
+            `═══════════════════════\n\n` +
+            `• *የፈቃድ ዓይነት:* ${after.leaveType || 'ፈቃድ'}\n` +
+            `• *ወቅት/ጊዜ:* ${after.duration || 'N/A'}\n` +
+            `• *አሁን ያለው ሁኔታ (Status):* *${statusAm}*\n` +
+            `• *ምክንያት / አስተያየት:* ${reason}\n` +
+            `• *የወሰነው:* ${adminName}\n\n` +
+            `ትኩረትዎ እናመሰግናለን!`;
+
+          const fetch = (global as any).fetch || require('node-fetch');
+          await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: recipientTelegramId,
+              text: msgText,
+              parse_mode: 'Markdown',
+            }),
+          });
+          console.log(`✅ Leave request notification sent to ${recipientTelegramId}`);
+        } catch (err) {
+          console.error('Failed to send leave request notification:', err);
+        }
+      }
+    }
+    return null;
+  });
