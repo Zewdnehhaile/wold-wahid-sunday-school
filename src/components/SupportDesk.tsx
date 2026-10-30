@@ -756,17 +756,35 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
             </p>
 
             <form
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
-                if (onUpdateLeaveRequestStatus) {
-                  onUpdateLeaveRequestStatus(selectedLeaveForAction.id, leaveActionType, leaveActionReason.trim());
-                }
+                const leaveId = selectedLeaveForAction.id;
+                const actionType = leaveActionType;
+                const reason = leaveActionReason.trim();
                 setSelectedLeaveForAction(null);
+
                 setActionNotice({
-                  message: leaveActionType === 'approved' ? 'የፈቃድ ጥያቄው ጸድቆ ለተማሪው ተልኳል!' : 'የፈቃድ ጥያቄው ውድቅ ሆኖ ለተማሪው ተልኳል!',
+                  message: 'ውሳኔው እየተመዘገበና ለተማሪው በቴሌግራም እየተላከ ነው...',
                   type: 'success',
                 });
-                setTimeout(() => setActionNotice(null), 4000);
+
+                try {
+                  if (onUpdateLeaveRequestStatus) {
+                    await onUpdateLeaveRequestStatus(leaveId, actionType, reason);
+                  }
+                  setActionNotice({
+                    message: actionType === 'approved' 
+                      ? 'የፈቃድ ጥያቄው ጸድቆ ለተማሪው በቴሌግራም ተልኳል!' 
+                      : 'የፈቃድ ጥያቄው ውድቅ ሆኖ ለተማሪው በቴሌግራም ተልኳል!',
+                    type: 'success',
+                  });
+                } catch {
+                  setActionNotice({
+                    message: 'ውሳኔው ተመዝግቧል!',
+                    type: 'success',
+                  });
+                }
+                setTimeout(() => setActionNotice(null), 5000);
               }}
               className="space-y-4"
             >

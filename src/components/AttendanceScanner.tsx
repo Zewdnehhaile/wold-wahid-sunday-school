@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Member, AttendanceRecord, ServiceSession, Language, AdminUser } from '../types';
 import { t } from '../utils/translations';
 import { formatEthiopianDate, formatEthiopianTime } from '../utils/ethiopianCalendar';
-import { apiFetch } from '../utils/api';
+import { sendTelegramMessage } from '../utils/telegram';
+import { collection, addDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import {
   QrCode,
@@ -365,22 +367,37 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
             <button
               onClick={async () => {
                 if (absentees.length === 0) return;
-                if (confirm(`${absentees.length} ተማሪዎች ዛሬ አልተገኙም። መንፈሳዊ የማሳሰቢያ መልእክት ለሁሉም መላክ ይፈልጋሉ?`)) {
+                const absenteeTgIds = absentees.map(m => m.telegramId).filter(Boolean);
+                if (window.confirm(`${absentees.length} ተማሪዎች ዛሬ አልተገኙም። መንፈሳዊ የማሳሰቢያ መልእክት ለሁሉም መላክ ይፈልጋሉ?`)) {
                   try {
-                    const res = await apiFetch('/api/notifications/broadcast', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        title: 'የዛሬው መርሐ ግብር ናፍቆት',
-                        message: `በክርስቶስ ፍጹም ሰላም እንደምን ቆያችሁ? ✝️\n\nዛሬ በ"${activeSession.nameAm}" መርሐ ግብራችን ላይ ስላልተገኙ ትምህርቱም ሆነ በረከቱ ጎድሎብናልና ናፍቆታችን ይድረስዎት።\n\nምናልባትም በበቂ ምክንያት ከሆነ በቦቱ በኩል "✉️ የፈቃድ መጠየቂያ" እንዲልኩ እናሳስባለን።\n\nየእግዚአብሔር ጸጋና ሰላም ከእርስዎ ጋር ይሁን።`,
-                        senderName: currentAdmin?.nameAm || 'አስተዳዳሪ',
-                        targetIds: absentees.map(m => m.telegramId).filter(Boolean)
-                      }),
-                    });
-                    const data = await res.json();
-                    alert(`መልእክቱ ለ ${data.sentToTelegram || 0} ተማሪዎች ተልኳል።`);
+                    const absentMsg =
+                      `📢 *የዛሬው መርሐ ግብር ናፍቆት*\n` +
+                      `⛪ *መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን*\n` +
+                      `═══════════════════════\n\n` +
+                      `በክርስቶስ ፍጹም ሰላም እንደምን ቆያችሁ? ✝️\n\n` +
+                      `ዛሬ በ"${activeSession.nameAm}" መርሐ ግብራችን ላይ ስላልተገኙ ትምህርቱም ሆነ በረከቱ ጎድሎብናልና ናፍቆታችን ይድረስዎት።\n\n` +
+                      `ምናልባትም በበቂ ምክንያት ከሆነ በቦቱ በኩል "✉️ የፈቃድ መጠየቂያ" እንዲልኩ እናሳስባለን።\n\n` +
+                      `የእግዚአብሔር ጸጋና ሰላም ከእርስዎ ጋር ይሁን።\n` +
+                      `✍️ ከ፡ ${currentAdmin?.nameAm || 'አስተዳዳሪ'}`;
+
+                    await addDoc(collection(db, 'notifications'), {
+                      title: 'የዛሬው መርሐ ግብር ናፍቆት',
+                      message: absentMsg,
+                      senderName: currentAdmin?.nameAm || 'አስተዳዳሪ',
+                      createdAt: new Date().toISOString(),
+                      isBroadcast: true
+                    }).catch(console.warn);
+
+                    let sentCount = 0;
+                    for (const tgId of absenteeTgIds) {
+                      if (tgId) {
+                        const res = await sendTelegramMessage(tgId, absentMsg, { parseMode: 'Markdown' });
+                        if (res.ok) sentCount++;
+                      }
+                    }
+                    alert(`የማሳሰቢያ መልእክቱ ለ ${sentCount} ተማሪዎች በቴሌግራም ተልኳል!`);
                   } catch (err) {
-                    alert('መልእክቱን መላክ አልተቻለም።');
+                    alert('መልእክቱን መላክ አልተቻለም። እባክዎ እንደገና ይሞክሩ።');
                   }
                 }
               }}

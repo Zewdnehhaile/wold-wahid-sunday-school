@@ -24,5 +24,6 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "exclude": ["dist", "mobile", "python_backend", "final_package"]
+  "include": ["src/**/*", "server.ts", "backend/**/*"],
+  "exclude": ["dist", "mobile", "python_backend", "final_package", "functions/**/*", "node_modules"]
 }

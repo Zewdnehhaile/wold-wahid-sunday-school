@@ -23,7 +23,12 @@ import { LoginPage } from './components/LoginPage';
 import { ApkDownloadPage } from './components/ApkDownloadPage';
 import { NotificationModal } from './components/NotificationModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
-import { apiFetch } from './utils/api';
+import {
+  sendLeaveDecisionTelegram,
+  sendRegistrationApprovalTelegram,
+  sendSupportReplyTelegram,
+  sendTelegramMessage,
+} from './utils/telegram';
 import {
   Calendar,
   Users,
@@ -413,22 +418,26 @@ export default function App() {
       // Use setDoc with the same ID as the registration to ensure consistency
       await setDoc(doc(db, 'students', memberId), studentData);
 
-      // 3. Call backend approval API to trigger Telegram notification
-      try {
-        await apiFetch(`/api/registrations/${memberId}/approve`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+      // 3. Dispatch Telegram approval directly to student
+      let sentTg = false;
+      if (targetReg?.telegramId) {
+        try {
+          const tgRes = await sendRegistrationApprovalTelegram({
+            telegramId: targetReg.telegramId,
+            studentName,
             studentCode: manualStudentId,
             approvedBy: currentAdmin.nameAm,
-          }),
-        });
-      } catch (backendErr) {
-        console.warn('Backend approval dispatch warning:', backendErr);
+          });
+          sentTg = tgRes.ok;
+        } catch (tgErr) {
+          console.warn('Direct Telegram registration approval notice:', tgErr);
+        }
       }
 
       setApprovalBanner({
-        message: `ተማሪ "${studentName}" በመታወቂያ ቁጥር "${manualStudentId}" በተሳካ ሁኔታ ጸድቋል!`,
+        message: sentTg
+          ? `ተማሪ "${studentName}" በመታወቂያ ቁጥር "${manualStudentId}" ጸድቋል፤ ለተማሪው በቴሌግራም ተልኳል!`
+          : `ተማሪ "${studentName}" በመታወቂያ ቁጥር "${manualStudentId}" በተሳካ ሁኔታ ጸድቋል!`,
         type: 'success',
       });
       setTimeout(() => setApprovalBanner(null), 7000);
@@ -444,11 +453,22 @@ export default function App() {
 
   const handleRejectMember = async (memberId: string) => {
     try {
+      const targetReg = registrations.find((r) => r.id === memberId) || students.find((s) => s.id === memberId);
       await updateDoc(doc(db, 'registrations', memberId), {
         status: 'rejected',
         rejectedAt: new Date().toISOString(),
         rejectedBy: currentAdmin.nameAm,
       });
+
+      if (targetReg?.telegramId) {
+        await sendTelegramMessage(
+          targetReg.telegramId,
+          `❌ *የምዝገባ ጥያቄዎ አልተቀበለም*\n` +
+          `ውድ ${targetReg.fullNameAm || 'ተማሪ'}፡ በመካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን የወልደ ዋሕድ ሰ/ት/ቤት የቀረበው የምዝገባ ጥያቄ አልተቀበለም።\n` +
+          `ለበለጠ መረጃ የሰንበት ት/ቤቱን አስተዳደር በአካል ያነጋግሩ።`,
+          { parseMode: 'Markdown' }
+        ).catch(console.warn);
+      }
     } catch (e) {
       console.error('Rejection failed:', e);
     }
@@ -592,6 +612,29 @@ export default function App() {
         approvedBy: currentAdmin.nameAm,
         updatedAt: new Date().toISOString(),
       }).catch(console.error);
+
+      const ticket = tickets.find((t) => t.id === ticketId);
+      let targetTg = ticket?.telegramId;
+      if (!targetTg && ticket) {
+        const matchStudent = students.find((s) => (ticket.phone && s.phone === ticket.phone) || (ticket.requesterName && s.fullNameAm === ticket.requesterName));
+        const matchReg = registrations.find((r) => (ticket.phone && r.phone === ticket.phone) || (ticket.requesterName && r.fullNameAm === ticket.requesterName));
+        targetTg = matchStudent?.telegramId || matchReg?.telegramId;
+      }
+      if (targetTg && ticket) {
+        const statusAm = status === 'approved' ? '✅ ጸድቋል (Approved)' : status === 'rejected' ? '❌ አልተቀበለም (Rejected)' : status === 'resolved' ? '✅ ተፈትቷል (Resolved)' : status === 'in_contact' ? '📞 በሂደት ላይ' : '📌 ታይቷል';
+        await sendTelegramMessage(
+          targetTg,
+          `💬 *የድጋፍ ጥያቄ ሁኔታ (Support Ticket Update)*\n` +
+          `⛪ *መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን*\n` +
+          `═══════════════════════\n\n` +
+          `🎫 *ቲኬት ቁጥር:* \`${ticket.ticketNumber || ticketId}\`\n` +
+          `📌 *ጉዳይ:* ${ticket.title || ticket.category}\n` +
+          `🟢 *ሁኔታ:* *${statusAm}*\n` +
+          `📝 *ምክንያት/አስተያየት:* ${reason || 'የለም'}\n` +
+          `✍️ *ያየው:* ${currentAdmin.nameAm}`,
+          { parseMode: 'Markdown' }
+        ).catch(console.warn);
+      }
     } catch (e) {
       console.error('Update ticket failed:', e);
     }
@@ -628,6 +671,24 @@ export default function App() {
         createdAt: new Date().toISOString(),
         isDirectReply: true,
       }).catch(console.error);
+
+      // Direct Telegram reply
+      let targetTg = ticket.telegramId;
+      if (!targetTg) {
+        const matchStudent = students.find((s) => (ticket.phone && s.phone === ticket.phone) || (ticket.requesterName && s.fullNameAm === ticket.requesterName));
+        const matchReg = registrations.find((r) => (ticket.phone && r.phone === ticket.phone) || (ticket.requesterName && r.fullNameAm === ticket.requesterName));
+        targetTg = matchStudent?.telegramId || matchReg?.telegramId;
+      }
+      if (targetTg) {
+        await sendSupportReplyTelegram({
+          telegramId: targetTg,
+          ticketNumber: ticket.ticketNumber || ticketId,
+          requesterName: ticket.requesterName,
+          title: ticket.title,
+          author: author || currentAdmin.nameAm,
+          replyText: text,
+        }).catch(console.warn);
+      }
     } catch (e) {
       console.error('Add note failed:', e);
     }
@@ -669,6 +730,59 @@ export default function App() {
         approvedBy: currentAdmin.nameAm,
         updatedAt: new Date().toISOString(),
       }).catch(console.error);
+
+      // Find details from leave request
+      const targetLeave = leaveRequests.find((l) => l.id === requestId);
+      let targetTelegramId = targetLeave?.telegramId;
+      const studentName = targetLeave?.studentName || 'ተማሪ';
+      const requestNumber = targetLeave?.requestNumber || 'LV-N/A';
+      const leaveType = targetLeave?.leaveType || 'ፈቃድ';
+      const duration = targetLeave?.duration || 'N/A';
+
+      // If telegramId is not on leave request object, search in students & registrations
+      if (!targetTelegramId) {
+        const matchStudent = students.find(
+          (s) => (targetLeave?.studentCode && s.code === targetLeave.studentCode) ||
+                 (s.fullNameAm && s.fullNameAm === targetLeave?.studentName)
+        );
+        const matchReg = registrations.find(
+          (r) => (targetLeave?.studentCode && r.code === targetLeave.studentCode) ||
+                 (r.fullNameAm && r.fullNameAm === targetLeave?.studentName)
+        );
+        targetTelegramId = (matchStudent?.telegramId || matchReg?.telegramId) as any;
+      }
+
+      // Send Telegram notification directly
+      let sentTg = false;
+      if (targetTelegramId) {
+        try {
+          const res = await sendLeaveDecisionTelegram({
+            telegramId: targetTelegramId,
+            studentName,
+            requestNumber,
+            leaveType,
+            duration,
+            status,
+            reason,
+            approvedBy: currentAdmin.nameAm,
+          });
+          sentTg = res.ok;
+        } catch (tgErr) {
+          console.warn('Direct Telegram leave decision notice:', tgErr);
+        }
+      }
+
+      setApprovalBanner({
+        message: sentTg
+          ? (status === 'approved'
+              ? `የተማሪ "${studentName}" የፈቃድ ጥያቄ ጸድቋል፤ ለተማሪው በቴሌግራም ተልኳል!`
+              : `የተማሪ "${studentName}" የፈቃድ ጥያቄ ውድቅ ሆኗል፤ ለተማሪው በቴሌግራም ተልኳል!`)
+          : (status === 'approved'
+              ? `የተማሪ "${studentName}" የፈቃድ ጥያቄ ጸድቋል!`
+              : `የተማሪ "${studentName}" የፈቃድ ጥያቄ ውድቅ ሆኗል!`),
+        type: 'success',
+      });
+      setTimeout(() => setApprovalBanner(null), 7000);
     } catch (e) {
       console.error('Update leave request status failed:', e);
     }

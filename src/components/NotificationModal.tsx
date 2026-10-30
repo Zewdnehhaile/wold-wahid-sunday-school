@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Send, Bell, CheckCircle2, AlertCircle, X, Megaphone } from 'lucide-react';
 import { collection, addDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { broadcastTelegramMessage } from '../utils/telegram';
 
 interface NotificationModalProps {
   isOpen: boolean;
@@ -29,23 +30,40 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
     setResult(null);
 
     try {
+      const cleanTitle = title.trim() || 'ወልደ ዋሕድ ሰንበት ት/ቤት ማስታወቂያ';
+      const cleanMsg = message.trim();
+
+      // 1. Record broadcast in Firestore notifications collection
       await addDoc(collection(db, 'notifications'), {
-        title: title.trim() || 'ወልደ ዋሕድ ሰንበት ት/ቤት ማስታወቂያ',
-        message: message.trim(),
+        title: cleanTitle,
+        message: cleanMsg,
         senderName: adminName || 'አስተዳዳሪ',
         createdAt: new Date().toISOString(),
         isBroadcast: true
       });
+
+      // 2. Dispatch broadcast to all Telegram subscribers and registered students
+      const tgRes = await broadcastTelegramMessage(
+        cleanMsg,
+        cleanTitle,
+        adminName || 'አስተዳዳሪ'
+      );
+
+      const successNotice =
+        tgRes.delivered > 0
+          ? `ማስታወቂያው ለ${tgRes.delivered} የቴሌግራም ተጠቃሚዎች በተሳካ ሁኔታ ተልኳል!`
+          : 'ማስታወቂያው በተሳካ ሁኔታ ተልኳል!';
+
       setResult({
         success: true,
-        text: 'ማስታወቂያው በተሳካ ሁኔታ ተልኳል!',
+        text: successNotice,
       });
       setTitle('');
       setMessage('');
       setTimeout(() => {
         onClose();
         setResult(null);
-      }, 2200);
+      }, 2500);
     } catch (err: any) {
       console.error('Broadcast failed:', err);
       setResult({
