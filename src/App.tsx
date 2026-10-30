@@ -413,20 +413,6 @@ export default function App() {
       // Use setDoc with the same ID as the registration to ensure consistency
       await setDoc(doc(db, 'students', memberId), studentData);
 
-      // 3. Call backend approval API to trigger Telegram notification
-      try {
-        await apiFetch(`/api/registrations/${memberId}/approve`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            studentCode: manualStudentId,
-            approvedBy: currentAdmin.nameAm,
-          }),
-        });
-      } catch (backendErr) {
-        console.warn('Backend approval dispatch warning:', backendErr);
-      }
-
       setApprovalBanner({
         message: `ተማሪ "${studentName}" በመታወቂያ ቁጥር "${manualStudentId}" በተሳካ ሁኔታ ጸድቋል!`,
         type: 'success',
@@ -592,11 +578,6 @@ export default function App() {
         approvedBy: currentAdmin.nameAm,
         updatedAt: new Date().toISOString(),
       }).catch(console.error);
-      await apiFetch(`/api/support_tickets/${ticketId}/status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, adminName: currentAdmin.nameAm, reason }),
-      }).catch((e) => console.warn('Support ticket status API notice:', e));
     } catch (e) {
       console.error('Update ticket failed:', e);
     }
@@ -652,8 +633,6 @@ export default function App() {
           }
         }
       }
-
-      await apiFetch(`/api/support_tickets/${ticketId}`, { method: 'DELETE' }).catch(() => {});
     } catch (e) {
       console.error('Delete ticket failed:', e);
     }
@@ -662,7 +641,6 @@ export default function App() {
   const handleDeleteLeaveRequest = async (requestId: string) => {
     try {
       await deleteDoc(doc(db, 'leave_requests', requestId));
-      await apiFetch(`/api/leave_requests/${requestId}`, { method: 'DELETE' }).catch(() => {});
     } catch (error) {
       console.error('Delete leave request failed:', error);
     }
@@ -677,12 +655,6 @@ export default function App() {
         approvedBy: currentAdmin.nameAm,
         updatedAt: new Date().toISOString(),
       }).catch(console.error);
-
-      await apiFetch(`/api/leave_requests/${requestId}/status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, adminName: currentAdmin.nameAm, reason }),
-      }).catch((e) => console.warn('Leave request status API notice:', e));
     } catch (e) {
       console.error('Update leave request status failed:', e);
     }
