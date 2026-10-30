@@ -8,7 +8,7 @@ import {
   AVATAR_FEMALE,
 } from './data/initialData';
 import { db } from './firebase';
-import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, getDocs, query, where, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, getDoc, addDoc, updateDoc, deleteDoc, getDocs, query, where, setDoc } from 'firebase/firestore';
 import { t } from './utils/translations';
 import { MemberList } from './components/MemberList';
 import { StudentPortalView } from './components/StudentPortalView';
@@ -721,7 +721,12 @@ export default function App() {
     }
   };
 
-  const handleUpdateLeaveRequestStatus = async (requestId: string, status: 'approved' | 'rejected', reason: string) => {
+  const handleUpdateLeaveRequestStatus = async (
+    requestId: string,
+    status: 'approved' | 'rejected',
+    reason: string,
+    extraLeaveData?: any
+  ) => {
     try {
       setLeaveRequests((prev) => prev.map((l) => (l.id === requestId ? { ...l, status, reason: reason || l.reason } : l)));
       await updateDoc(doc(db, 'leave_requests', requestId), {
@@ -731,37 +736,63 @@ export default function App() {
         updatedAt: new Date().toISOString(),
       }).catch(console.error);
 
-      // Find details from leave request
-      const targetLeave = leaveRequests.find((l) => l.id === requestId);
-      let targetTelegramId = targetLeave?.telegramId;
-      const studentName = targetLeave?.studentName || 'ተማሪ';
-      const requestNumber = targetLeave?.requestNumber || 'LV-N/A';
-      const leaveType = targetLeave?.leaveType || 'ፈቃድ';
-      const duration = targetLeave?.duration || 'N/A';
+      // 1. First priority: Use immediately supplied extraLeaveData snapshot
+      let targetTelegramId = extraLeaveData?.telegramId;
+      let studentName = extraLeaveData?.studentName;
+      let requestNumber = extraLeaveData?.requestNumber;
+      let leaveType = extraLeaveData?.leaveType;
+      let duration = extraLeaveData?.duration;
 
-      // If telegramId is not on leave request object, search in students & registrations
+      // 2. Second priority: Fresh direct read from Firestore document
+      if (!targetTelegramId || !studentName) {
+        try {
+          const freshSnap = await getDoc(doc(db, 'leave_requests', requestId));
+          if (freshSnap.exists()) {
+            const data = freshSnap.data();
+            targetTelegramId = targetTelegramId || data.telegramId || data.tgId || data.chatId;
+            studentName = studentName || data.studentName || data.fullNameAm || 'ተማሪ';
+            requestNumber = requestNumber || data.requestNumber || `LV-${requestId.slice(0, 4)}`;
+            leaveType = leaveType || data.leaveType || 'ፈቃድ';
+            duration = duration || data.duration || 'N/A';
+          }
+        } catch (fetchErr) {
+          console.warn('Fresh leave doc lookup warning:', fetchErr);
+        }
+      }
+
+      // 3. Third priority: Check React state
+      if (!targetTelegramId) {
+        const targetLeave = leaveRequests.find((l) => l.id === requestId);
+        targetTelegramId = targetLeave?.telegramId;
+        studentName = studentName || targetLeave?.studentName || 'ተማሪ';
+        requestNumber = requestNumber || targetLeave?.requestNumber || 'LV-N/A';
+        leaveType = leaveType || targetLeave?.leaveType || 'ፈቃድ';
+        duration = duration || targetLeave?.duration || 'N/A';
+      }
+
+      // 4. Fallback search in students and registrations
       if (!targetTelegramId) {
         const matchStudent = students.find(
-          (s) => (targetLeave?.studentCode && s.code === targetLeave.studentCode) ||
-                 (s.fullNameAm && s.fullNameAm === targetLeave?.studentName)
+          (s) => (requestNumber && s.code === requestNumber) ||
+                 (studentName && s.fullNameAm === studentName)
         );
         const matchReg = registrations.find(
-          (r) => (targetLeave?.studentCode && r.code === targetLeave.studentCode) ||
-                 (r.fullNameAm && r.fullNameAm === targetLeave?.studentName)
+          (r) => (requestNumber && r.code === requestNumber) ||
+                 (studentName && r.fullNameAm === studentName)
         );
         targetTelegramId = (matchStudent?.telegramId || matchReg?.telegramId) as any;
       }
 
-      // Send Telegram notification directly
+      // 5. Send Telegram notification directly
       let sentTg = false;
       if (targetTelegramId) {
         try {
           const res = await sendLeaveDecisionTelegram({
             telegramId: targetTelegramId,
-            studentName,
-            requestNumber,
-            leaveType,
-            duration,
+            studentName: studentName || 'ተማሪ',
+            requestNumber: requestNumber || 'LV-N/A',
+            leaveType: leaveType || 'ፈቃድ',
+            duration: duration || 'N/A',
             status,
             reason,
             approvedBy: currentAdmin.nameAm,

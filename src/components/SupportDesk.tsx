@@ -35,7 +35,7 @@ interface SupportDeskProps {
   onUpdateTicketStatus: (ticketId: string, status: SupportStatus, reason?: string) => void;
   onDeleteTicket: (ticketId: string) => void;
   onDeleteLeaveRequest: (requestId: string) => void;
-  onUpdateLeaveRequestStatus?: (requestId: string, status: 'approved' | 'rejected', reason: string) => void;
+  onUpdateLeaveRequestStatus?: (requestId: string, status: 'approved' | 'rejected', reason: string, leaveData?: any) => Promise<any> | void;
   onAddNote: (ticketId: string, author: string, text: string) => void;
   onUpdateAttendance?: (id: string, updated: Partial<AttendanceRecord>) => void;
   lang: Language;
@@ -761,6 +761,7 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
                 const leaveId = selectedLeaveForAction.id;
                 const actionType = leaveActionType;
                 const reason = leaveActionReason.trim();
+                const leaveSnapshot = { ...selectedLeaveForAction };
                 setSelectedLeaveForAction(null);
 
                 setActionNotice({
@@ -770,7 +771,7 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
 
                 try {
                   if (onUpdateLeaveRequestStatus) {
-                    await onUpdateLeaveRequestStatus(leaveId, actionType, reason);
+                    await onUpdateLeaveRequestStatus(leaveId, actionType, reason, leaveSnapshot);
                   }
                   setActionNotice({
                     message: actionType === 'approved' 
