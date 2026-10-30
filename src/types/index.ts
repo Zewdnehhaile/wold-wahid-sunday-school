@@ -32,6 +32,15 @@ export type MemberStatus = 'active' | 'pending_approval' | 'rejected' | 'inactiv
 
 export type UserRole = 'super_admin' | 'admin';
 
+export interface AdminPermission {
+  canAccessSchedule: boolean;
+  canAccessMembers: boolean;
+  canAccessAttendance: boolean;
+  canAccessSupport: boolean;
+  canAccessAdmins: boolean;
+  canAccessAnalytics: boolean;
+}
+
 export interface AdminUser {
   id: string;
   nameAm: string;
@@ -40,6 +49,10 @@ export interface AdminUser {
   department: SundaySchoolDepartment;
   avatarUrl?: string;
   phone?: string;
+  permissions?: AdminPermission;
+  password?: string;
+  customRoleTitle?: string;
+  status?: 'active' | 'suspended';
 }
 
 export interface Member {

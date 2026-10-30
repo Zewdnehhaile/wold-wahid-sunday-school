@@ -5,7 +5,7 @@ import { db } from '../firebase';
 import { collection, getDocs, doc, setDoc } from 'firebase/firestore';
 
 interface LoginPageProps {
-  onLogin: (adminData: { id?: string; nameAm: string; nameEn: string; phone: string; role: 'super_admin' | 'admin' }) => void;
+  onLogin: (adminData: { id?: string; nameAm: string; nameEn: string; phone: string; role: 'super_admin' | 'admin'; permissions?: any }) => void;
   onOpenStudentPortal?: () => void;
 }
 
@@ -78,6 +78,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onOpenStudentPort
         nameEn: matchedAdmin.nameEn || matchedAdmin.nameAm || 'Admin',
         phone: matchedAdmin.phone || cleanPhone,
         role: matchedAdmin.role === 'super_admin' ? 'super_admin' : 'admin',
+        permissions: matchedAdmin.permissions,
       });
     } catch (err: any) {
       console.error('Firestore login error:', err);

@@ -354,7 +354,64 @@ export default function App() {
 
   const dict = t[lang];
 
-  // Real Actions hooked to Firestore and Backend Notification
+  // Granular Nav Tab Permissions based on current admin's role and permission checkboxes
+  const isSuperAdmin = currentAdmin.role === 'super_admin';
+  const perms = currentAdmin.permissions || {
+    canAccessSchedule: true,
+    canAccessMembers: true,
+    canAccessAttendance: true,
+    canAccessSupport: true,
+    canAccessAdmins: isSuperAdmin,
+    canAccessAnalytics: isSuperAdmin,
+  };
+
+  const canSchedule = isSuperAdmin || perms.canAccessSchedule;
+  const canMembers = isSuperAdmin || perms.canAccessMembers;
+  const canAttendance = isSuperAdmin || perms.canAccessAttendance;
+  const canSupport = isSuperAdmin || perms.canAccessSupport;
+  const canAdmins = isSuperAdmin || perms.canAccessAdmins;
+  const canAnalytics = isSuperAdmin || perms.canAccessAnalytics;
+
+  const allowedNavTabs = [
+    { id: 'schedule', label: dict.nav.schedule, mobileLabel: 'መርሐ ግብር', icon: Calendar, allowed: canSchedule },
+    { id: 'members', label: dict.nav.members, mobileLabel: 'ተማሪዎች', icon: Users, count: pendingCount, allowed: canMembers },
+    { id: 'attendance', label: dict.nav.attendance, mobileLabel: 'መገኘት', icon: QrCode, allowed: canAttendance },
+    { id: 'support', label: dict.nav.support, mobileLabel: 'ድጋፍ', icon: HeartHandshake, count: totalNewSupportCount, allowed: canSupport },
+    { id: 'admins', label: dict.nav.admins, mobileLabel: 'አድሚኖች', icon: ShieldCheck, allowed: canAdmins },
+    { id: 'analytics', label: dict.nav.analytics, mobileLabel: 'ሪፖርት', icon: BarChart3, allowed: canAnalytics },
+  ].filter((t) => t.allowed);
+
+  // Auto-redirect if active tab is revoked or not allowed
+  useEffect(() => {
+    if (isLoggedIn && allowedNavTabs.length > 0) {
+      if (!allowedNavTabs.some((t) => t.id === activeTab)) {
+        setActiveTab(allowedNavTabs[0].id);
+      }
+    }
+  }, [isLoggedIn, canSchedule, canMembers, canAttendance, canSupport, canAdmins, canAnalytics]);
+
+  // Real-time synchronization of logged-in admin permissions from Firestore
+  useEffect(() => {
+    if (!isLoggedIn || !currentAdmin.id) return;
+    const unsub = onSnapshot(doc(db, 'admins', currentAdmin.id), (snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        if (d.status === 'suspended') {
+          setIsLoggedIn(false);
+          return;
+        }
+        if (d.permissions) {
+          setCurrentAdmin((prev) => ({
+            ...prev,
+            permissions: d.permissions,
+            role: d.role || prev.role,
+            customRoleTitle: d.customRoleTitle || prev.customRoleTitle,
+          }));
+        }
+      }
+    });
+    return () => unsub();
+  }, [isLoggedIn, currentAdmin.id]);
   const handleAddMember = async (newMember: Member) => {
     try {
       await addDoc(collection(db, 'students'), {
@@ -870,9 +927,34 @@ export default function App() {
             nameEn: admin.nameEn,
             phone: admin.phone,
             role: admin.role,
+            permissions: admin.permissions,
           }));
           setIsLoggedIn(true);
-          setActiveTab('attendance');
+
+          const defaultPerms = admin.permissions || {
+            canAccessSchedule: true,
+            canAccessMembers: true,
+            canAccessAttendance: true,
+            canAccessSupport: true,
+            canAccessAdmins: admin.role === 'super_admin',
+            canAccessAnalytics: admin.role === 'super_admin',
+          };
+
+          if (admin.role === 'super_admin' || defaultPerms.canAccessAttendance) {
+            setActiveTab('attendance');
+          } else if (defaultPerms.canAccessSchedule) {
+            setActiveTab('schedule');
+          } else if (defaultPerms.canAccessMembers) {
+            setActiveTab('members');
+          } else if (defaultPerms.canAccessSupport) {
+            setActiveTab('support');
+          } else if (defaultPerms.canAccessAdmins) {
+            setActiveTab('admins');
+          } else if (defaultPerms.canAccessAnalytics) {
+            setActiveTab('analytics');
+          } else {
+            setActiveTab('schedule');
+          }
         }}
         onOpenStudentPortal={() => setShowStudentPortal(true)}
       />
@@ -902,14 +984,7 @@ export default function App() {
 
         {/* Zone 2: Concise Single-Line Nav Links - Visible on Tablets, Laptops & Desktops */}
         <nav className="hidden md:flex items-center gap-1 bg-[#062414]/40 p-1.5 rounded-2xl border border-[#0f4425]/50 shadow-inner overflow-x-auto max-w-2xl">
-          {[
-            { id: 'schedule', label: dict.nav.schedule },
-            { id: 'members', label: dict.nav.members, count: pendingCount },
-            { id: 'attendance', label: dict.nav.attendance },
-            { id: 'support', label: dict.nav.support, count: totalNewSupportCount },
-            { id: 'admins', label: dict.nav.admins },
-            { id: 'analytics', label: dict.nav.analytics },
-          ].map((nav) => (
+          {allowedNavTabs.map((nav) => (
             <button
               key={nav.id}
               onClick={() => setActiveTab(nav.id)}
@@ -977,16 +1052,11 @@ export default function App() {
         </div>
       </header>
 
-      {/* Mobile Nav Bar - Always visible and clean on small screens */}
-      <div className="no-print md:hidden border-b border-[#0f4425] bg-[#09351c] px-3 py-3 grid grid-cols-3 sm:grid-cols-6 gap-2 z-40 shadow-md">
-        {[
-          { id: 'schedule', label: 'መርሐ ግብር', icon: Calendar },
-          { id: 'members', label: 'ተማሪዎች', icon: Users, count: pendingCount },
-          { id: 'attendance', label: 'መገኘት', icon: QrCode },
-          { id: 'support', label: 'ድጋፍ', icon: HeartHandshake, count: totalNewSupportCount },
-          { id: 'admins', label: 'አድሚኖች', icon: ShieldCheck },
-          { id: 'analytics', label: 'ሪፖርት', icon: BarChart3 },
-        ].map((tab) => {
+      {/* Mobile Nav Bar - Dynamically adapts to allowed tabs */}
+      <div className={`no-print md:hidden border-b border-[#0f4425] bg-[#09351c] px-3 py-3 grid gap-2 z-40 shadow-md ${
+        allowedNavTabs.length <= 3 ? 'grid-cols-3' : allowedNavTabs.length === 4 ? 'grid-cols-4' : allowedNavTabs.length === 5 ? 'grid-cols-5' : 'grid-cols-3 sm:grid-cols-6'
+      }`}>
+        {allowedNavTabs.map((tab) => {
           const Icon = tab.icon;
           return (
             <button
@@ -999,7 +1069,7 @@ export default function App() {
               }`}
             >
               <Icon className={`w-4 h-4 ${activeTab === tab.id ? 'text-slate-950' : 'text-amber-400'}`} />
-              <span className="text-[10px] font-bold tracking-tight leading-tight">{tab.label}</span>
+              <span className="text-[10px] font-bold tracking-tight leading-tight">{tab.mobileLabel}</span>
               {tab.count !== undefined && tab.count > 0 && activeTab !== tab.id && (
                 <span className="absolute -top-1.5 -right-1 bg-rose-500 text-white font-black px-1.5 py-0.2 rounded-full text-[9px] border border-[#09351c] animate-pulse">
                   {tab.count}
@@ -1033,14 +1103,14 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'schedule' && (
+        {activeTab === 'schedule' && canSchedule && (
           <ScheduleView
             onSelectSessionForAttendance={handleSelectSessionFromSchedule}
             lang={lang}
           />
         )}
 
-        {activeTab === 'members' && (
+        {activeTab === 'members' && canMembers && (
           <MemberList
             members={members}
             onAddMember={handleAddMember}
@@ -1054,7 +1124,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'attendance' && (
+        {activeTab === 'attendance' && canAttendance && (
           <AttendanceScanner
             members={members}
             attendance={attendance}
@@ -1069,7 +1139,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'support' && (
+        {activeTab === 'support' && canSupport && (
           <SupportDesk
             tickets={tickets}
             leaveRequests={leaveRequests}
@@ -1086,14 +1156,14 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'admins' && (
+        {activeTab === 'admins' && canAdmins && (
           <AdminManagement
             currentAdmin={currentAdmin}
             lang={lang}
           />
         )}
 
-        {activeTab === 'analytics' && (
+        {activeTab === 'analytics' && canAnalytics && (
           <AnalyticsView
             members={members}
             attendance={attendance}

@@ -24,10 +24,12 @@ import {
 import { ChangePasswordModal } from './ChangePasswordModal';
 
 export interface AdminPermission {
-  approveStudents: boolean;
-  takeAttendance: boolean;
-  manageSupport: boolean;
-  exportReports: boolean;
+  canAccessSchedule: boolean;
+  canAccessMembers: boolean;
+  canAccessAttendance: boolean;
+  canAccessSupport: boolean;
+  canAccessAdmins: boolean;
+  canAccessAnalytics: boolean;
 }
 
 export interface DetailedAdmin extends AdminUser {
@@ -63,10 +65,12 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
   const [newAdminTelegramId, setNewAdminTelegramId] = useState('');
   const [newAdminDept, setNewAdminDept] = useState<SundaySchoolDepartment>('education');
   const [customRoleTitle, setCustomRoleTitle] = useState('የትምህርት ክፍል አስተባባሪ');
-  const [permApprove, setPermApprove] = useState(true);
+  const [permSchedule, setPermSchedule] = useState(true);
+  const [permMembers, setPermMembers] = useState(true);
   const [permAttendance, setPermAttendance] = useState(true);
   const [permSupport, setPermSupport] = useState(true);
-  const [permReports, setPermReports] = useState(false);
+  const [permAdmins, setPermAdmins] = useState(false);
+  const [permAnalytics, setPermAnalytics] = useState(false);
 
   // Real-time Firestore synchronization for administrators from live database
   useEffect(() => {
@@ -88,10 +92,12 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
             status: (d.status === 'suspended' ? 'suspended' : 'active') as 'active' | 'suspended',
             avatarUrl: d.avatarUrl || AVATAR_MALE,
             permissions: d.permissions || {
-              approveStudents: d.role === 'super_admin',
-              takeAttendance: true,
-              manageSupport: true,
-              exportReports: d.role === 'super_admin',
+              canAccessSchedule: true,
+              canAccessMembers: true,
+              canAccessAttendance: true,
+              canAccessSupport: true,
+              canAccessAdmins: d.role === 'super_admin',
+              canAccessAnalytics: d.role === 'super_admin',
             },
           };
         });
@@ -139,10 +145,12 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
       telegramId: newAdminTelegramId.trim() || `${Math.floor(100000000 + Math.random() * 900000000)}`,
       avatarUrl: AVATAR_MALE,
       permissions: {
-        approveStudents: assignedRole === 'super_admin' ? true : permApprove,
-        takeAttendance: assignedRole === 'super_admin' ? true : permAttendance,
-        manageSupport: assignedRole === 'super_admin' ? true : permSupport,
-        exportReports: assignedRole === 'super_admin' ? true : permReports,
+        canAccessSchedule: assignedRole === 'super_admin' ? true : permSchedule,
+        canAccessMembers: assignedRole === 'super_admin' ? true : permMembers,
+        canAccessAttendance: assignedRole === 'super_admin' ? true : permAttendance,
+        canAccessSupport: assignedRole === 'super_admin' ? true : permSupport,
+        canAccessAdmins: assignedRole === 'super_admin' ? true : permAdmins,
+        canAccessAnalytics: assignedRole === 'super_admin' ? true : permAnalytics,
       },
     };
 
@@ -215,9 +223,20 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
     const target = adminsList.find((a) => a.id === adminId);
     if (!target || target.role === 'super_admin') return;
 
-    const newPerms = {
-      ...target.permissions,
-      [permKey]: !target.permissions[permKey],
+    const defaultPerms: AdminPermission = {
+      canAccessSchedule: true,
+      canAccessMembers: true,
+      canAccessAttendance: true,
+      canAccessSupport: true,
+      canAccessAdmins: false,
+      canAccessAnalytics: false,
+    };
+
+    const currentPerms = target.permissions || defaultPerms;
+    const newPerms: AdminPermission = {
+      ...defaultPerms,
+      ...currentPerms,
+      [permKey]: !currentPerms[permKey],
     };
 
     setAdminsList((prev) =>
@@ -225,7 +244,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
     );
 
     try {
-      await updateDoc(doc(db, 'admins', adminId), { permissions: newPerms });
+      await setDoc(doc(db, 'admins', adminId), { permissions: newPerms }, { merge: true });
     } catch (err) {
       console.error('Failed to toggle permission:', err);
     }
@@ -344,9 +363,11 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                 <th className="py-3 px-4">አስተዳዳሪ (Admin)</th>
                 <th className="py-3 px-4">ሚና (Role) & ስልክ</th>
                 <th className="py-3 px-4">ሁኔታ (Status)</th>
-                <th className="py-3 px-4 text-center">ተማሪዎችን ማጽደቅ</th>
+                <th className="py-3 px-4 text-center">መርሐ ግብር</th>
+                <th className="py-3 px-4 text-center">ተማሪዎች</th>
                 <th className="py-3 px-4 text-center">QR ክትትል</th>
                 <th className="py-3 px-4 text-center">ድጋፍ</th>
+                <th className="py-3 px-4 text-center">አድሚኖች</th>
                 <th className="py-3 px-4 text-center">ሪፖርት</th>
                 <th className="py-3 px-4 text-right">እርምጃዎች</th>
               </tr>
@@ -429,60 +450,94 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                       </span>
                     </td>
 
-                    {/* Permissions Switches */}
+                    {/* Nav Permissions Toggles */}
                     <td className="py-3 px-4 text-center">
                       <button
                         disabled={isSuper}
-                        onClick={() => handleTogglePermission(adm.id, 'approveStudents')}
+                        onClick={() => handleTogglePermission(adm.id, 'canAccessSchedule')}
                         className={`p-1.5 rounded-lg transition-colors ${
-                          adm.permissions.approveStudents
+                          adm.permissions?.canAccessSchedule
                             ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                             : 'bg-[#062414] text-slate-500 border border-[#0f4425]'
                         } ${isSuper ? 'opacity-80 cursor-default' : 'hover:scale-105 cursor-pointer'}`}
+                        title="መርሐ ግብር ፈቃድ"
                       >
-                        {adm.permissions.approveStudents ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                        {adm.permissions?.canAccessSchedule ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                       </button>
                     </td>
 
                     <td className="py-3 px-4 text-center">
                       <button
                         disabled={isSuper}
-                        onClick={() => handleTogglePermission(adm.id, 'takeAttendance')}
+                        onClick={() => handleTogglePermission(adm.id, 'canAccessMembers')}
                         className={`p-1.5 rounded-lg transition-colors ${
-                          adm.permissions.takeAttendance
+                          adm.permissions?.canAccessMembers
                             ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                             : 'bg-[#062414] text-slate-500 border border-[#0f4425]'
                         } ${isSuper ? 'opacity-80 cursor-default' : 'hover:scale-105 cursor-pointer'}`}
+                        title="ተማሪዎች ፈቃድ"
                       >
-                        {adm.permissions.takeAttendance ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                        {adm.permissions?.canAccessMembers ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                       </button>
                     </td>
 
                     <td className="py-3 px-4 text-center">
                       <button
                         disabled={isSuper}
-                        onClick={() => handleTogglePermission(adm.id, 'manageSupport')}
+                        onClick={() => handleTogglePermission(adm.id, 'canAccessAttendance')}
                         className={`p-1.5 rounded-lg transition-colors ${
-                          adm.permissions.manageSupport
+                          adm.permissions?.canAccessAttendance
                             ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                             : 'bg-[#062414] text-slate-500 border border-[#0f4425]'
                         } ${isSuper ? 'opacity-80 cursor-default' : 'hover:scale-105 cursor-pointer'}`}
+                        title="QR ክትትል ፈቃድ"
                       >
-                        {adm.permissions.manageSupport ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                        {adm.permissions?.canAccessAttendance ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                       </button>
                     </td>
 
                     <td className="py-3 px-4 text-center">
                       <button
                         disabled={isSuper}
-                        onClick={() => handleTogglePermission(adm.id, 'exportReports')}
+                        onClick={() => handleTogglePermission(adm.id, 'canAccessSupport')}
                         className={`p-1.5 rounded-lg transition-colors ${
-                          adm.permissions.exportReports
+                          adm.permissions?.canAccessSupport
                             ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                             : 'bg-[#062414] text-slate-500 border border-[#0f4425]'
                         } ${isSuper ? 'opacity-80 cursor-default' : 'hover:scale-105 cursor-pointer'}`}
+                        title="ድጋፍ እና ፈቃድ ፈቃድ"
                       >
-                        {adm.permissions.exportReports ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                        {adm.permissions?.canAccessSupport ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                      </button>
+                    </td>
+
+                    <td className="py-3 px-4 text-center">
+                      <button
+                        disabled={isSuper}
+                        onClick={() => handleTogglePermission(adm.id, 'canAccessAdmins')}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          adm.permissions?.canAccessAdmins
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-[#062414] text-slate-500 border border-[#0f4425]'
+                        } ${isSuper ? 'opacity-80 cursor-default' : 'hover:scale-105 cursor-pointer'}`}
+                        title="አድሚኖች ማኔጅመንት ፈቃድ"
+                      >
+                        {adm.permissions?.canAccessAdmins ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                      </button>
+                    </td>
+
+                    <td className="py-3 px-4 text-center">
+                      <button
+                        disabled={isSuper}
+                        onClick={() => handleTogglePermission(adm.id, 'canAccessAnalytics')}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          adm.permissions?.canAccessAnalytics
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-[#062414] text-slate-500 border border-[#0f4425]'
+                        } ${isSuper ? 'opacity-80 cursor-default' : 'hover:scale-105 cursor-pointer'}`}
+                        title="ሪፖርት እና ትንተና ፈቃድ"
+                      >
+                        {adm.permissions?.canAccessAnalytics ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                       </button>
                     </td>
 
@@ -693,17 +748,27 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
               {/* Permissions Checklist */}
               <div>
                 <label className="block text-emerald-100 font-semibold mb-2">
-                  የተፈቀዱ ስራዎች (Allowed Permissions)
+                  የተፈቀዱ የናቪጌሽን ባር ሜኑዎች (Allowed Nav Tabs)
                 </label>
-                <div className="grid grid-cols-2 gap-2 bg-[#062414] p-3 rounded-xl border border-[#0f4425]">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-[#062414] p-3 rounded-xl border border-[#0f4425]">
                   <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={permApprove}
-                      onChange={(e) => setPermApprove(e.target.checked)}
+                      checked={permSchedule}
+                      onChange={(e) => setPermSchedule(e.target.checked)}
                       className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
                     />
-                    <span>ተማሪዎችን ማጽደቅ</span>
+                    <span>መርሐ ግብር</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={permMembers}
+                      onChange={(e) => setPermMembers(e.target.checked)}
+                      className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
+                    />
+                    <span>ተማሪዎች</span>
                   </label>
 
                   <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
@@ -713,7 +778,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                       onChange={(e) => setPermAttendance(e.target.checked)}
                       className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
                     />
-                    <span>የQR ክትትል መመዝገብ</span>
+                    <span>QR ክትትል</span>
                   </label>
 
                   <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
@@ -723,17 +788,27 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                       onChange={(e) => setPermSupport(e.target.checked)}
                       className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
                     />
-                    <span>የድጋፍ ጥያቄ መከታተል</span>
+                    <span>ድጋፍና ፈቃድ</span>
                   </label>
 
                   <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={permReports}
-                      onChange={(e) => setPermReports(e.target.checked)}
+                      checked={permAdmins}
+                      onChange={(e) => setPermAdmins(e.target.checked)}
                       className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
                     />
-                    <span>ሪፖርት ማውጣት</span>
+                    <span>አድሚኖች ማኔጅመንት</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={permAnalytics}
+                      onChange={(e) => setPermAnalytics(e.target.checked)}
+                      className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
+                    />
+                    <span>ሪፖርትና ትንተና</span>
                   </label>
                 </div>
               </div>
@@ -849,6 +924,92 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                     onChange={(e) => setEditingAdmin({ ...editingAdmin, customRoleTitle: e.target.value })}
                     className="w-full px-3 py-2 bg-[#062414] border border-[#0f4425] rounded-xl text-white focus:outline-none focus:border-amber-400"
                   />
+                </div>
+              </div>
+
+              {/* Edit Permissions Checklist */}
+              <div>
+                <label className="block text-emerald-100 font-semibold mb-2">
+                  የተፈቀዱ የናቪጌሽን ባር ሜኑዎች (Allowed Nav Tabs)
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-[#062414] p-3 rounded-xl border border-[#0f4425]">
+                  <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingAdmin.permissions?.canAccessSchedule ?? true}
+                      onChange={(e) => setEditingAdmin({
+                        ...editingAdmin,
+                        permissions: { ...(editingAdmin.permissions || {}), canAccessSchedule: e.target.checked } as any
+                      })}
+                      className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
+                    />
+                    <span>መርሐ ግብር</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingAdmin.permissions?.canAccessMembers ?? true}
+                      onChange={(e) => setEditingAdmin({
+                        ...editingAdmin,
+                        permissions: { ...(editingAdmin.permissions || {}), canAccessMembers: e.target.checked } as any
+                      })}
+                      className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
+                    />
+                    <span>ተማሪዎች</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingAdmin.permissions?.canAccessAttendance ?? true}
+                      onChange={(e) => setEditingAdmin({
+                        ...editingAdmin,
+                        permissions: { ...(editingAdmin.permissions || {}), canAccessAttendance: e.target.checked } as any
+                      })}
+                      className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
+                    />
+                    <span>QR ክትትል</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingAdmin.permissions?.canAccessSupport ?? true}
+                      onChange={(e) => setEditingAdmin({
+                        ...editingAdmin,
+                        permissions: { ...(editingAdmin.permissions || {}), canAccessSupport: e.target.checked } as any
+                      })}
+                      className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
+                    />
+                    <span>ድጋፍና ፈቃድ</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingAdmin.permissions?.canAccessAdmins ?? false}
+                      onChange={(e) => setEditingAdmin({
+                        ...editingAdmin,
+                        permissions: { ...(editingAdmin.permissions || {}), canAccessAdmins: e.target.checked } as any
+                      })}
+                      className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
+                    />
+                    <span>አድሚኖች ማኔጅመንት</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingAdmin.permissions?.canAccessAnalytics ?? false}
+                      onChange={(e) => setEditingAdmin({
+                        ...editingAdmin,
+                        permissions: { ...(editingAdmin.permissions || {}), canAccessAnalytics: e.target.checked } as any
+                      })}
+                      className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
+                    />
+                    <span>ሪፖርትና ትንተና</span>
+                  </label>
                 </div>
               </div>
 
