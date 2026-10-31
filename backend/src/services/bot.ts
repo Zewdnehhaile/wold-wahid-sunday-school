@@ -1198,13 +1198,40 @@ export async function handleTelegramUpdate(update: any) {
         );
       } else if (session.step === 'photo') {
         let photoVal = text;
+        let finalPhotoUrl = '';
+        
         if (msg.photo && msg.photo.length > 0) {
           const largestPhoto = msg.photo[msg.photo.length - 1];
           photoVal = `tg_file:${largestPhoto.file_id}`;
         } else if (msg.document && msg.document.mime_type?.startsWith('image/')) {
           photoVal = `tg_file:${msg.document.file_id}`;
         }
+        
         session.data.photo = photoVal && photoVal !== 'None' ? photoVal : '';
+
+        // If it's a Telegram file, convert it to Base64 immediately for cross-platform compatibility (Vercel/Web)
+        if (session.data.photo.startsWith('tg_file:')) {
+          try {
+            const fileId = session.data.photo.replace('tg_file:', '');
+            const bot = getBot();
+            if (bot) {
+              const file = await bot.getFile(fileId);
+              const filePath = file.file_path;
+              const downloadUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
+              const res = await fetch(downloadUrl);
+              const buffer = await res.arrayBuffer();
+              const base64 = Buffer.from(buffer).toString('base64');
+              const contentType = res.headers.get('content-type') || 'image/jpeg';
+              finalPhotoUrl = `data:${contentType};base64,${base64}`;
+            }
+          } catch (fetchErr) {
+            console.error('Failed to convert Telegram photo to Base64:', fetchErr);
+            // Fallback to proxy URL if conversion fails
+            finalPhotoUrl = `/api/telegram/file/${session.data.photo.replace('tg_file:', '')}`;
+          }
+        } else {
+          finalPhotoUrl = session.data.photo;
+        }
 
         try {
           await db.collection('registrations').add({
@@ -1221,9 +1248,7 @@ export async function handleTelegramUpdate(update: any) {
               relation: 'ቤተሰብ / Family'
             },
             department: session.data.department,
-            photoUrl: session.data.photo.startsWith('tg_file:') 
-              ? `/api/telegram/file/${session.data.photo.replace('tg_file:', '')}` 
-              : session.data.photo,
+            photoUrl: finalPhotoUrl,
             status: 'pending',
             telegramId: telegramId,
             telegramUsername: msg.from?.username || '',

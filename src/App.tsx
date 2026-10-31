@@ -115,9 +115,24 @@ export default function App() {
             roleEn: 'Student',
             christianName: d.christianName || '',
             birthYear: d.birthYear || d.birthDate || '',
-            photoUrl: (d.photoUrl?.startsWith('tg_file:') 
-            ? `/api/telegram/file/${d.photoUrl.replace('tg_file:', '')}` 
-            : d.photoUrl) || (d.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE),
+            photoUrl: (() => {
+              const raw = d.photoUrl || '';
+              const isTg = raw.startsWith('tg_file:');
+              const isProxy = raw.startsWith('/api/telegram/file/');
+              const isData = raw.startsWith('data:');
+              const isFull = raw.startsWith('http');
+              
+              if (isData || isFull) return raw;
+              
+              const devUrl = 'https://ais-dev-reccyxuqfinpjq7hy5yle5-147288418331.europe-west2.run.app';
+              const isProductionVercel = window.location.hostname.includes('vercel.app');
+              const baseUrl = isProductionVercel ? devUrl : '';
+              
+              if (isTg) return `${baseUrl}/api/telegram/file/${raw.replace('tg_file:', '')}`;
+              if (isProxy) return `${baseUrl}${raw}`;
+              
+              return raw || (d.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE);
+            })(),
             registeredDate: d.submittedAt?.split('T')[0] || new Date().toISOString().split('T')[0],
             bloodGroup: d.bloodGroup || 'O+',
             emergencyContact: d.emergencyContact || { 
@@ -159,9 +174,24 @@ export default function App() {
           gradeLevel: d.gradeLevel || 'general',
           roleAm: 'ተማሪ / Student',
           roleEn: 'Student',
-          photoUrl: (d.photoUrl?.startsWith('tg_file:') 
-            ? `/api/telegram/file/${d.photoUrl.replace('tg_file:', '')}` 
-            : d.photoUrl) || (d.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE),
+            photoUrl: (() => {
+              const raw = d.photoUrl || '';
+              const isTg = raw.startsWith('tg_file:');
+              const isProxy = raw.startsWith('/api/telegram/file/');
+              const isData = raw.startsWith('data:');
+              const isFull = raw.startsWith('http');
+              
+              if (isData || isFull) return raw;
+              
+              const devUrl = 'https://ais-dev-reccyxuqfinpjq7hy5yle5-147288418331.europe-west2.run.app';
+              const isProductionVercel = window.location.hostname.includes('vercel.app');
+              const baseUrl = isProductionVercel ? devUrl : '';
+              
+              if (isTg) return `${baseUrl}/api/telegram/file/${raw.replace('tg_file:', '')}`;
+              if (isProxy) return `${baseUrl}${raw}`;
+              
+              return raw || (d.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE);
+            })(),
           registeredDate: d.registeredDate || new Date().toISOString().split('T')[0],
           bloodGroup: d.bloodGroup || 'O+',
           emergencyContact: d.emergencyContact || { 
