@@ -50,7 +50,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
     setIsAdminFlow(false);
   };
-
   const handleLogin = async () => {
     const trimmedInput = identifier.trim();
     if (!trimmedInput) {
@@ -60,6 +59,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
     setLoading(true);
 
+    try {
       // 1. Identify Admin vs Student (Unified Database Check)
       const digits = trimmedInput.replace(/\D/g, '').slice(-9);
       
@@ -101,7 +101,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         }
       } catch (e: any) {
         // Only if studentLogin explicitly throws "Not Found", we show that error.
-        // Otherwise, it might be a network error where we can retry or use limited local data.
         if (e.message && e.message.includes('አልተገኘም')) {
           Alert.alert('ያልተመዘገበ መለያ (Not Found)', e.message);
           setLoading(false);
