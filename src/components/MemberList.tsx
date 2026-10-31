@@ -922,6 +922,47 @@ export const MemberList: React.FC<MemberListProps> = ({
               }}
               className="space-y-4 text-xs"
             >
+              {/* Photo Upload for Edit Student */}
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-2">
+                  የተማሪው ፎቶ (Student Photo)
+                </label>
+                <div className="flex items-center gap-4">
+                  <img
+                    src={editingMember.photoUrl || (editingMember.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE)}
+                    alt="Preview"
+                    className="w-16 h-22 rounded-xl object-cover border-2 border-amber-400/50 shadow-md shrink-0 bg-slate-950"
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = editingMember.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE;
+                    }}
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="flex flex-col gap-2">
+                    <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 text-xs text-amber-400 hover:text-amber-300 border border-slate-700 transition-colors">
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>ፎቶ ቀይር (Change Photo)</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setEditingMember({ ...editingMember, photoUrl: reader.result as string });
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                        className="hidden"
+                      />
+                    </label>
+                    <p className="text-[10px] text-slate-500 italic">ከኮምፒውተርዎ አዲስ ፎቶ ይጫኑ (Upload new photo)</p>
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <label className="text-slate-300 block mb-1 font-medium">ሙሉ ስም (Amharic) *</label>
                 <input
