@@ -60,25 +60,36 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
     setLoading(true);
 
-    try {
-      const upperInput = trimmedInput.toUpperCase();
-      const cleanPhone = trimmedInput.replace(/\D/g, '').slice(-9);
-
-      // Check if admin
-      if (cleanPhone === '0988286610' || trimmedInput.includes('0988286610')) {
+      // 1. Identify Admin vs Student (Unified Database Check)
+      const digits = trimmedInput.replace(/\D/g, '').slice(-9);
+      
+      // If we detected it's an admin (either from previous check or now)
+      if (isAdminFlow || digits === '988286610') {
         if (!password) {
           setIsAdminFlow(true);
           setLoading(false);
-          Alert.alert('የይለፍ ቃል ያስፈልጋል', 'እባክዎ የአስተዳዳሪ የይለፍ ቃል ያስገቡ');
+          Alert.alert('የይለፍ ቃል ያስፈልጋል (Password Required)', 'እባክዎ የአስተዳዳሪ የይለፍ ቃል ያስገቡ\n(Please enter your admin password)');
           return;
         }
-        await AsyncStorage.setItem('studentCode', 'admin-0988286610');
-        await AsyncStorage.setItem('userRole', 'admin');
-        onLoginSuccess('admin-0988286610', 'admin');
-        return;
+
+        try {
+          const aRes = await adminLogin(digits, password);
+          if (aRes && aRes.success) {
+            const adminCode = aRes.admin.code || `admin-${digits}`;
+            await AsyncStorage.setItem('studentCode', adminCode);
+            await AsyncStorage.setItem('userRole', 'admin');
+            onLoginSuccess(adminCode, 'admin');
+            return;
+          }
+        } catch (adminErr: any) {
+          Alert.alert('የአስተዳዳሪ ስህተት', adminErr.message || 'የይለፍ ቃል አልተሳካም');
+          setLoading(false);
+          return;
+        }
       }
 
-      // Try API login with fallback
+      // 2. Student Login (Real Database Auth)
+      const upperInput = trimmedInput.toUpperCase();
       try {
         const sRes = await studentLogin(trimmedInput);
         if (sRes && sRes.success && sRes.student) {
@@ -88,21 +99,32 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           onLoginSuccess(code, 'student');
           return;
         }
-      } catch (e) {
-        console.warn('Student login fallback:', e);
+      } catch (e: any) {
+        // Only if studentLogin explicitly throws "Not Found", we show that error.
+        // Otherwise, it might be a network error where we can retry or use limited local data.
+        if (e.message && e.message.includes('አልተገኘም')) {
+          Alert.alert('ያልተመዘገበ መለያ (Not Found)', e.message);
+          setLoading(false);
+          return;
+        }
+        console.warn('Student login network issue:', e);
       }
 
-      // Default successful offline student login so user is never blocked
-      const studentCode = upperInput.startsWith('WW') ? upperInput : `WW-2026-${cleanPhone.slice(-4) || '0001'}`;
-      await AsyncStorage.setItem('studentCode', studentCode);
-      await AsyncStorage.setItem('userRole', 'student');
-      onLoginSuccess(studentCode, 'student');
-    } catch (error) {
-      console.error('Login error:', error);
-      const fallbackCode = `WW-2026-0001`;
-      await AsyncStorage.setItem('studentCode', fallbackCode);
-      await AsyncStorage.setItem('userRole', 'student');
-      onLoginSuccess(fallbackCode, 'student');
+      // If we reached here, try one last check with profile API
+      try {
+        const profile = await getStudentProfile(trimmedInput);
+        if (profile && profile.id) {
+          await AsyncStorage.setItem('studentCode', profile.code);
+          await AsyncStorage.setItem('userRole', 'student');
+          onLoginSuccess(profile.code, 'student');
+          return;
+        }
+      } catch {}
+
+      Alert.alert('ስህተት', 'ያስገቡት መለያ በመረጃ ቋቱ ውስጥ አልተገኘም። እባክዎ በትክክል መሆኑን ያረጋግጡ።');
+    } catch (error: any) {
+      console.error('Final Login Catch:', error);
+      Alert.alert('የመግባት ችግር', 'ከመረጃ ቋቱ ጋር መገናኘት አልተቻለም። እባክዎ የኢንተርኔት ግንኙነትዎን ያረጋግጡ።');
     } finally {
       setLoading(false);
     }
