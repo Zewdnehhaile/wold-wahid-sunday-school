@@ -84,18 +84,23 @@ async function startServer() {
       let studentTgId = '';
 
       try {
-        const [studentsSnap, regSnap] = await Promise.all([
-          db.collection('students').get(),
-          db.collection('registrations').get(),
-        ]);
-        const allDocs = [...studentsSnap.docs, ...regSnap.docs];
-        const foundDoc = allDocs.find(d => {
-          const dData = d.data();
-          const dCode = String(dData.code || dData.studentCode || '').trim().toUpperCase();
-          const dPhone = String(dData.phone || '').replace(/\D/g, '').slice(-9);
-          const codeDigits = cleanCode.replace(/\D/g, '').slice(-9);
-          return dCode === cleanCode || (codeDigits && dPhone && dPhone === codeDigits);
-        });
+        // Targeted query for student by code or phone to save quota
+        const codeDigits = cleanCode.replace(/\D/g, '').slice(-9);
+        
+        // Try students collection first
+        const studentByCode = await db.collection('students').where('code', '==', cleanCode).limit(1).get();
+        let foundDoc = !studentByCode.empty ? studentByCode.docs[0] : null;
+
+        if (!foundDoc && codeDigits) {
+          const studentByPhone = await db.collection('students').where('phone', '>=', '0' + codeDigits).where('phone', '<=', '0' + codeDigits + '\uf8ff').limit(1).get();
+          if (!studentByPhone.empty) foundDoc = studentByPhone.docs[0];
+        }
+
+        // Then try registrations
+        if (!foundDoc) {
+          const regByCode = await db.collection('registrations').where('studentCode', '==', cleanCode).limit(1).get();
+          if (!regByCode.empty) foundDoc = regByCode.docs[0];
+        }
 
         if (foundDoc) {
           const dData = foundDoc.data();
@@ -201,20 +206,21 @@ async function startServer() {
         return res.status(400).json({ error: 'Valid phone number is required' });
       }
 
-      // 1. Check admins collection in Firestore
+      // 1. Check admins collection in Firestore using targeted where
       try {
-        const adminsSnap = await db.collection('admins').get();
-        for (const doc of adminsSnap.docs) {
+        // Try direct phone match and common formats
+        const formats = [cleanPhone, '0' + cleanPhone, '+251' + cleanPhone];
+        const adminsSnap = await db.collection('admins').where('phone', 'in', formats).limit(1).get();
+        
+        if (!adminsSnap.empty) {
+          const doc = adminsSnap.docs[0];
           const data = doc.data();
-          const dPhone = (data.phone || '').replace(/\D/g, '').slice(-9);
-          if (dPhone && cleanPhone && dPhone === cleanPhone) {
-            return res.json({
-              id: doc.id,
-              ...data,
-              role: data.role || 'admin',
-              password: data.password || ''
-            });
-          }
+          return res.json({
+            id: doc.id,
+            ...data,
+            role: data.role || 'admin',
+            password: data.password || ''
+          });
         }
       } catch (e) {
         console.warn('Error reading admins collection:', e);
@@ -222,11 +228,16 @@ async function startServer() {
 
       // 2. Check students collection for records with admin / super_admin role
       try {
-        const studentsSnap = await db.collection('students').get();
-        for (const doc of studentsSnap.docs) {
+        const formats = [cleanPhone, '0' + cleanPhone, '+251' + cleanPhone];
+        const studentsSnap = await db.collection('students')
+          .where('phone', 'in', formats)
+          .limit(1)
+          .get();
+        
+        if (!studentsSnap.empty) {
+          const doc = studentsSnap.docs[0];
           const data = doc.data();
-          const sPhone = (data.phone || '').replace(/\D/g, '').slice(-9);
-          if (sPhone && cleanPhone && sPhone === cleanPhone && (data.role === 'admin' || data.role === 'super_admin')) {
+          if (data.role === 'admin' || data.role === 'super_admin') {
             return res.json({ 
               id: doc.id, 
               ...data, 
@@ -256,42 +267,42 @@ async function startServer() {
       const cleanPhone = String(phone).replace(/\D/g, '').slice(-9);
       const cleanPass = String(password).trim();
 
-      // Check admins collection
-      const adminsSnap = await db.collection('admins').get();
-      for (const doc of adminsSnap.docs) {
+      // Check admins collection with targeted query
+      const formats = [cleanPhone, '0' + cleanPhone, '+251' + cleanPhone];
+      const adminsSnap = await db.collection('admins').where('phone', 'in', formats).limit(1).get();
+      
+      if (!adminsSnap.empty) {
+        const doc = adminsSnap.docs[0];
         const data = doc.data();
-        const dPhone = String(data.phone || '').replace(/\D/g, '').slice(-9);
-        if (dPhone && cleanPhone && dPhone === cleanPhone) {
-          if (data.status === 'suspended') {
-            return res.status(403).json({ error: 'ይህ የአስተዳዳሪ አካውንት ታግዷል (Account is suspended)' });
-          }
-          const storedPassword = String(data.password || '').trim();
-          if (cleanPass !== storedPassword) {
-            return res.status(401).json({ error: 'የተሳሳተ የይለፍ ቃል (Incorrect admin password)' });
-          }
-          return res.json({
-            success: true,
-            role: data.role || 'admin',
-            admin: {
-              id: doc.id,
-              nameAm: data.nameAm || '',
-              nameEn: data.nameEn || '',
-              phone: data.phone,
-              role: data.role || 'admin',
-              department: data.department || 'general',
-              permissions: data.permissions || {},
-              customRoleTitle: data.customRoleTitle || ''
-            }
-          });
+        if (data.status === 'suspended') {
+          return res.status(403).json({ error: 'ይህ የአስተዳዳሪ አካውንት ታግዷል (Account is suspended)' });
         }
+        const storedPassword = String(data.password || '').trim();
+        if (cleanPass !== storedPassword) {
+          return res.status(401).json({ error: 'የተሳሳተ የይለፍ ቃል (Incorrect admin password)' });
+        }
+        return res.json({
+          success: true,
+          role: data.role || 'admin',
+          admin: {
+            id: doc.id,
+            nameAm: data.nameAm || '',
+            nameEn: data.nameEn || '',
+            phone: data.phone,
+            role: data.role || 'admin',
+            department: data.department || 'general',
+            permissions: data.permissions || {},
+            customRoleTitle: data.customRoleTitle || ''
+          }
+        });
       }
 
-      // Check students collection for admin role
-      const studentsSnap = await db.collection('students').get();
-      for (const doc of studentsSnap.docs) {
+      // Check students collection for admin role with targeted query
+      const studentsSnap = await db.collection('students').where('phone', 'in', formats).limit(1).get();
+      if (!studentsSnap.empty) {
+        const doc = studentsSnap.docs[0];
         const data = doc.data();
-        const sPhone = String(data.phone || '').replace(/\D/g, '').slice(-9);
-        if (sPhone && cleanPhone && sPhone === cleanPhone && (data.role === 'admin' || data.role === 'super_admin')) {
+        if (data.role === 'admin' || data.role === 'super_admin') {
           const storedPassword = String(data.password || '').trim();
           if (storedPassword && cleanPass !== storedPassword) {
             return res.status(401).json({ error: 'የተሳሳተ የይለፍ ቃል (Incorrect admin password)' });
@@ -331,51 +342,60 @@ async function startServer() {
       const upperCode = rawInput.toUpperCase();
       const cleanPhone = rawInput.replace(/\D/g, '').slice(-9);
 
-      // 1. Search in students collection
-      const studentsSnap = await db.collection('students').get();
-      for (const doc of studentsSnap.docs) {
-        const data = doc.data();
-        const dCode = String(data.code || data.studentCode || '').trim().toUpperCase();
-        const dPhone = String(data.phone || '').replace(/\D/g, '').slice(-9);
+      // 1. Search in students collection with targeted queries
+      const formats = [cleanPhone, '0' + cleanPhone, '+251' + cleanPhone];
+      
+      // Try ID/Code match first
+      const studentById = await db.collection('students').doc(rawInput).get();
+      if (studentById.exists) {
+        const data = studentById.data();
+        return res.json({
+          success: true,
+          student: { id: studentById.id, code: data.code || data.studentCode || upperCode, role: 'student', ...data }
+        });
+      }
 
-        if (
-          doc.id === rawInput ||
-          (dCode && dCode === upperCode) ||
-          (cleanPhone && dPhone && dPhone === cleanPhone)
-        ) {
+      const studentByCode = await db.collection('students').where('code', '==', upperCode).limit(1).get();
+      if (!studentByCode.empty) {
+        const doc = studentByCode.docs[0];
+        const data = doc.data();
+        return res.json({
+          success: true,
+          student: { id: doc.id, code: data.code || data.studentCode || upperCode, role: 'student', ...data }
+        });
+      }
+
+      if (cleanPhone) {
+        const studentByPhone = await db.collection('students').where('phone', 'in', formats).limit(1).get();
+        if (!studentByPhone.empty) {
+          const doc = studentByPhone.docs[0];
+          const data = doc.data();
           return res.json({
             success: true,
-            student: {
-              id: doc.id,
-              code: data.code || data.studentCode || upperCode,
-              role: 'student',
-              ...data
-            }
+            student: { id: doc.id, code: data.code || data.studentCode || upperCode, role: 'student', ...data }
           });
         }
       }
 
       // 2. Search in registrations collection
-      const regSnap = await db.collection('registrations').get();
-      for (const doc of regSnap.docs) {
+      const regByCode = await db.collection('registrations').where('studentCode', '==', upperCode).limit(1).get();
+      if (!regByCode.empty) {
+        const doc = regByCode.docs[0];
         const data = doc.data();
-        const dCode = String(data.studentCode || data.code || '').trim().toUpperCase();
-        const dPhone = String(data.phone || '').replace(/\D/g, '').slice(-9);
+        return res.json({
+          success: true,
+          student: { id: doc.id, code: data.studentCode || data.code || upperCode, status: data.status || 'pending', role: 'student', ...data }
+        });
+      }
 
-        if (
-          doc.id === rawInput ||
-          (dCode && dCode === upperCode) ||
-          (cleanPhone && dPhone && dPhone === cleanPhone)
-        ) {
+      if (cleanPhone) {
+        const regByPhone = await db.collection('registrations').where('phone', 'in', formats).limit(1).get();
+        if (!regByPhone.empty) {
+          const doc = regByPhone.docs[0];
+          const data = doc.data();
           return res.json({
             success: true,
-            student: {
-              id: doc.id,
-              code: data.studentCode || data.code || upperCode,
-              status: data.status || 'pending',
-              role: 'student',
-              ...data
-            }
+            student: { id: doc.id, code: data.studentCode || data.code || upperCode, status: data.status || 'pending', role: 'student', ...data }
           });
         }
       }

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { WOLD_WAHID_LOGO } from '../data/initialData';
 import { Shield, Lock, Phone, ArrowRight, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { db } from '../firebase';
-import { collection, getDocs, doc, setDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, query, where } from 'firebase/firestore';
 
 interface LoginPageProps {
   onLogin: (adminData: { id?: string; nameAm: string; nameEn: string; phone: string; role: 'super_admin' | 'admin'; permissions?: any }) => void;
@@ -33,20 +33,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onOpenStudentPort
     setIsLoading(true);
 
     try {
-      // Fetch all admins directly from Firestore database
+      // Fetch matching admins using targeted query to save quota
       const adminsRef = collection(db, 'admins');
-      const snapshot = await getDocs(adminsRef);
+      const inputDigits = cleanPhone.replace(/\D/g, '').slice(-9);
+      
+      // Try a few common formats for the phone number
+      const phoneFormats = [cleanPhone, '0' + inputDigits, '+251' + inputDigits];
+      const q = query(adminsRef, where('phone', 'in', phoneFormats));
+      const snapshot = await getDocs(q);
 
-      let adminRecords = snapshot.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-      })) as any[];
-
-      // Query database for admin matching input phone
-      const matchedAdmin = adminRecords.find((adm) => {
-        const dbPhoneDigits = (adm.phone || '').replace(/[\s\-\+]/g, '').replace(/\D/g, '').slice(-9);
-        return dbPhoneDigits && dbPhoneDigits === inputDigits;
-      });
+      let matchedAdmin = null;
+      if (!snapshot.empty) {
+        matchedAdmin = {
+          id: snapshot.docs[0].id,
+          ...snapshot.docs[0].data(),
+        } as any;
+      }
 
       if (!matchedAdmin) {
         setError('ይህ ስልክ ቁጥር በአስተዳዳሪዎች ዝርዝር ውስጥ አልተገኘም (Admin phone not found in database)');
@@ -82,7 +84,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onOpenStudentPort
       });
     } catch (err: any) {
       console.error('Firestore login error:', err);
-      setError('የመረብ ችግር አጋጥሟል፤ እባክዎ እንደገና ይሞክሩ (Connection error)');
+      if (err?.message?.includes('Quota limit exceeded') || err?.code === 'resource-exhausted' || err?.message?.includes('quota')) {
+        setError('የዳታቤዝ ገደብ ተደርሷል (Firestore Quota Exceeded). እባክዎ ነገ እንደገና ይሞክሩ።');
+      } else {
+        setError('የመረብ ችግር አጋጥሟል፤ እባክዎ እንደገና ይሞክሩ (Connection error)');
+      }
     } finally {
       setIsLoading(false);
     }

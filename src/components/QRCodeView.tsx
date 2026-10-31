@@ -57,7 +57,9 @@ export const QRCodeView: React.FC<QRCodeViewProps> = ({
         minWidth: size,
         minHeight: size,
         backgroundColor: lightColor,
-      }}
+        colorAdjust: 'exact',
+        WebkitPrintColorAdjust: 'exact',
+      } as React.CSSProperties}
     />
   );
 };

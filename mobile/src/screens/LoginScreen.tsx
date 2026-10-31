@@ -62,9 +62,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     try {
       // 1. Identify Admin vs Student (Unified Database Check)
       const digits = trimmedInput.replace(/\D/g, '').slice(-9);
+      const isKnownAdmin = digits === '988286610' || digits === '911234567';
       
-      // If we detected it's an admin (either from previous check or now)
-      if (isAdminFlow || digits === '988286610') {
+      // If we detected it's an admin (either from previous check, now, or hardcoded match)
+      if (isAdminFlow || isKnownAdmin) {
         if (!password) {
           setIsAdminFlow(true);
           setLoading(false);

@@ -3,6 +3,7 @@ import { Member, AttendanceRecord, Language, SundaySchoolDepartment } from '../t
 import { WOLD_WAHID_LOGO, WOLD_WAHID_SCHEDULE } from '../data/initialData';
 import { formatEthiopianDate } from '../utils/ethiopianCalendar';
 import { getPhotoUrl } from '../utils/photoUtils';
+import { getApiUrl } from '../utils/apiConfig';
 import { db } from '../firebase';
 import { collection, addDoc } from 'firebase/firestore';
 import {
@@ -89,7 +90,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
 
     // 2. Query backend API /api/students/:identifier if not found locally
     try {
-      const res = await fetch(`/api/students/${encodeURIComponent(clean)}`);
+      const res = await fetch(getApiUrl(`/api/students/${encodeURIComponent(clean)}`));
       if (res.ok) {
         const data = await res.json();
         const studentObj: Member = {
@@ -722,14 +723,37 @@ Leave Request Submitted!
                       </select>
                     </div>
                     <div>
-                      <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1.5 ml-2">10. ፎቶ ሊንክ (Photo URL)</label>
-                      <input
-                        type="url"
-                        value={regPhotoUrl}
-                        onChange={(e) => setRegPhotoUrl(e.target.value)}
-                        placeholder="https://... (ከተገኘ)"
-                        className="w-full px-5 py-3.5 bg-[#062414] border-2 border-[#0f4425] rounded-2xl text-white font-mono font-black focus:outline-none focus:border-amber-400 shadow-inner"
-                      />
+                      <label className="block text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1.5 ml-2">10. ፎቶ (Profile Photo)</label>
+                      <div className="flex items-center gap-3 bg-[#062414] border-2 border-[#0f4425] rounded-2xl p-2">
+                        {regPhotoUrl ? (
+                          <img src={regPhotoUrl} className="w-10 h-10 rounded-lg object-cover border border-amber-400/50" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-lg bg-emerald-950 flex items-center justify-center text-emerald-800 border border-emerald-900">
+                            <Upload className="w-5 h-5" />
+                          </div>
+                        )}
+                        <label className="flex-1 cursor-pointer">
+                          <span className="text-[10px] font-black text-amber-400/80 hover:text-amber-400 transition-colors px-2">ፎቶ ይምረጡ (Select Photo)</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => setRegPhotoUrl(reader.result as string);
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                            className="hidden"
+                          />
+                        </label>
+                        {regPhotoUrl && (
+                          <button type="button" onClick={() => setRegPhotoUrl('')} className="p-1.5 text-rose-500 hover:bg-rose-500/10 rounded-lg transition-colors">
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>

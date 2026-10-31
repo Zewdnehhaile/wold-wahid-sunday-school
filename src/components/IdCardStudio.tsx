@@ -88,6 +88,51 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center p-4 overflow-y-auto">
+      {/* Print Styles */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          body * { visibility: hidden; }
+          #printable-single-badge, #printable-single-badge *,
+          #batch-print-grid, #batch-print-grid * { visibility: visible; }
+          
+          #printable-single-badge {
+            position: fixed !important;
+            left: 50% !important;
+            top: 50% !important;
+            transform: translate(-50%, -50%) scale(1.1) !important;
+            margin: 0 !important;
+            box-shadow: none !important;
+            border: 2px solid #f59e0b !important;
+          }
+
+          #batch-print-grid {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 20mm !important;
+            background: white !important;
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 15mm !important;
+          }
+
+          .batch-card-item {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            box-shadow: none !important;
+            margin: 0 auto !important;
+            border: 2px solid #f59e0b !important;
+          }
+
+          @page {
+            size: A4;
+            margin: 10mm;
+          }
+        }
+      `}} />
+
       {/* Control bar */}
       <div className="no-print bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl p-4 mb-4 flex flex-wrap items-center justify-between gap-4 shadow-2xl">
         <div className="flex items-center gap-3">

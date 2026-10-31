@@ -8,7 +8,7 @@ import {
   AVATAR_FEMALE,
 } from './data/initialData';
 import { db } from './firebase';
-import { collection, onSnapshot, doc, getDoc, addDoc, updateDoc, deleteDoc, getDocs, query, where, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, getDoc, addDoc, updateDoc, deleteDoc, getDocs, query, where, setDoc, limit } from 'firebase/firestore';
 import { t } from './utils/translations';
 import { getPhotoUrl } from './utils/photoUtils';
 import { MemberList } from './components/MemberList';
@@ -49,6 +49,7 @@ import {
   CheckCircle2,
   X,
   KeyRound,
+  AlertTriangle,
 } from 'lucide-react';
 
 export default function App() {
@@ -56,6 +57,15 @@ export default function App() {
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
   const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
   const [approvalBanner, setApprovalBanner] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
+
+  const handleSnapshotError = (name: string) => (error: any) => {
+    console.error(`${name} snapshot error:`, error);
+    if (error?.message?.includes('Quota limit exceeded') || error?.code === 'resource-exhausted' || error?.message?.includes('quota')) {
+      setQuotaExceeded(true);
+    }
+  };
+
   const isTelegramContext = typeof window !== 'undefined' && (
     Boolean((window as any).Telegram?.WebApp?.initData) ||
     window.location.hash.includes('tgWebAppData') ||
@@ -96,9 +106,9 @@ export default function App() {
 
   // Real-time Firestore subscriptions
   useEffect(() => {
-    // 1. Listen to real-time pending & approved registrations
+    // 1. Listen to real-time pending & approved registrations (Limited to 200 most recent)
     const unsubReg = onSnapshot(
-      collection(db, 'registrations'),
+      query(collection(db, 'registrations'), limit(200)),
       (snap) => {
         const regList: Member[] = snap.docs.map((docSnap) => {
           const d = docSnap.data();
@@ -135,13 +145,11 @@ export default function App() {
         });
         setRegistrations(regList);
       },
-      (error) => {
-        console.error('Firestore registrations snapshot error:', error);
-      }
+      handleSnapshotError('Registrations')
     );
 
-    // 2. Listen to real-time approved students
-    const unsubStudents = onSnapshot(collection(db, 'students'), (snap) => {
+    // 2. Listen to real-time approved students (Limited to 500)
+    const unsubStudents = onSnapshot(query(collection(db, 'students'), limit(500)), (snap) => {
       const studentList: Member[] = snap.docs.map((docSnap) => {
         const d = docSnap.data();
         const isPending = d.status === 'pending_approval' || d.status === 'pending';
@@ -158,7 +166,7 @@ export default function App() {
           gradeLevel: d.gradeLevel || 'general',
           roleAm: 'ተማሪ / Student',
           roleEn: 'Student',
-            photoUrl: getPhotoUrl(d.photoUrl, d.gender === 'female' ? 'female' : 'male'),
+          photoUrl: getPhotoUrl(d.photoUrl, d.gender === 'female' ? 'female' : 'male'),
           registeredDate: d.registeredDate || new Date().toISOString().split('T')[0],
           bloodGroup: d.bloodGroup || 'O+',
           emergencyContact: d.emergencyContact || { 
@@ -176,12 +184,10 @@ export default function App() {
         };
       });
       setStudents(studentList);
-    }, (error) => {
-      console.error('Students snapshot error:', error);
-    });
+    }, handleSnapshotError('Students'));
 
-    // 3. Listen to real-time support tickets
-    const unsubTickets = onSnapshot(collection(db, 'support_tickets'), (snap) => {
+    // 3. Listen to real-time support tickets (Recent 50)
+    const unsubTickets = onSnapshot(query(collection(db, 'support_tickets'), limit(50)), (snap) => {
       const ticketList: SupportTicket[] = snap.docs.map((docSnap) => {
         const d = docSnap.data();
         return {
@@ -201,35 +207,38 @@ export default function App() {
         };
       });
       setTickets(ticketList);
-    }, (error) => {
-      console.error('Support tickets snapshot error:', error);
-    });
+    }, handleSnapshotError('Support tickets'));
 
-    // 4. Listen to real-time attendance logs
-    const unsubAttendance = onSnapshot(collection(db, 'attendance'), (snap) => {
-      const attList: AttendanceRecord[] = snap.docs.map((docSnap) => {
-        const d = docSnap.data();
-        return {
-          id: docSnap.id,
-          memberId: d.memberId || d.studentId || '',
-          memberNameAm: d.memberNameAm || d.fullNameAm || 'Student',
-          memberNameEn: d.memberNameEn || d.fullNameEn || 'Student',
-          memberCode: d.memberCode || d.studentCode || '',
-          department: d.department || d.departmentResponsible || 'education',
-          sessionName: d.sessionName || 'Sunday School Session',
-          timestamp: d.timestamp || '',
-          date: d.date || '',
-          method: d.method || 'qr',
-          status: d.status || 'present',
-        };
-      });
-      setAttendance(attList);
-    }, (error) => {
-      console.error('Attendance snapshot error:', error);
-    });
+    // 4. Listen to real-time attendance logs (Only last 7 days to save quota)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const dateStr = sevenDaysAgo.toISOString().split('T')[0];
 
-    // 5. Listen to real-time leave requests
-    const unsubLeaves = onSnapshot(collection(db, 'leave_requests'), (snap) => {
+    const unsubAttendance = onSnapshot(
+      query(collection(db, 'attendance'), where('date', '>=', dateStr), limit(300)), 
+      (snap) => {
+        const attList: AttendanceRecord[] = snap.docs.map((docSnap) => {
+          const d = docSnap.data();
+          return {
+            id: docSnap.id,
+            memberId: d.memberId || d.studentId || '',
+            memberNameAm: d.memberNameAm || d.fullNameAm || 'Student',
+            memberNameEn: d.memberNameEn || d.fullNameEn || 'Student',
+            memberCode: d.memberCode || d.studentCode || '',
+            department: d.department || d.departmentResponsible || 'education',
+            sessionName: d.sessionName || 'Sunday School Session',
+            timestamp: d.timestamp || '',
+            date: d.date || '',
+            method: d.method || 'qr',
+            status: d.status || 'present',
+          };
+        });
+        setAttendance(attList);
+      }, handleSnapshotError('Attendance')
+    );
+
+    // 5. Listen to real-time leave requests (Pending 50)
+    const unsubLeaves = onSnapshot(query(collection(db, 'leave_requests'), limit(50)), (snap) => {
       const list: LeaveRequest[] = snap.docs.map((docSnap) => {
         const d = docSnap.data();
         return {
@@ -245,16 +254,14 @@ export default function App() {
         };
       });
       setLeaveRequests(list);
-    }, (error) => {
-      console.error('Leave requests snapshot error:', error);
-    });
+    }, handleSnapshotError('Leave requests'));
 
-    // 6. Real-time push notification receiver (online & offline PWA support)
+    // 6. Real-time push notification receiver (capped to 20 most recent)
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().catch(() => {});
     }
 
-    const unsubNotifs = onSnapshot(collection(db, 'notifications'), (snap) => {
+    const unsubNotifs = onSnapshot(query(collection(db, 'notifications'), limit(20)), (snap) => {
       snap.docChanges().forEach((change) => {
         if (change.type === 'added') {
           const data = change.doc.data();
@@ -280,9 +287,7 @@ export default function App() {
           }
         }
       });
-    }, (error) => {
-      console.error('Notifications snapshot error:', error);
-    });
+    }, handleSnapshotError('Notifications'));
 
     return () => {
       unsubReg();
@@ -954,6 +959,24 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#062414] text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
+      {quotaExceeded && (
+        <div className="no-print bg-amber-950/90 border-b border-amber-500/50 text-amber-200 px-4 py-3 text-sm flex flex-wrap items-center justify-between gap-3 shadow-lg z-50">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+            <span>
+              <strong>Firestore Free Daily Quota Limit Exceeded:</strong> Reads are currently restricted by Firestore free daily limits. The quota will automatically reset tomorrow, or you can manage limits in your Firebase Console.
+            </span>
+          </div>
+          <a
+            href="https://console.firebase.google.com/project/chromatic-wonder-f6tp2/firestore/databases/ai-studio-d3279648-1f3b-4293-8893-cd76f3d816dc/data?openUpgradeDialog=true"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-1 bg-amber-500 text-slate-950 font-bold rounded-lg text-xs hover:bg-amber-400 transition shrink-0"
+          >
+            Manage Quota in Firebase Console
+          </a>
+        </div>
+      )}
       {/* Top Bar Contract: Zone 1 (Wordmark) - Zone 2 (Nav Links) - Zone 3 (Profile & Logout) */}
       <header className="no-print border-b border-[#0f4425] bg-[#09351c]/95 backdrop-blur-xl sticky top-0 z-50 px-4 sm:px-8 py-4 flex items-center justify-between gap-8 shadow-2xl shadow-emerald-950/60 transition-all duration-300">
         {/* Zone 1: Brand Wordmark */}

@@ -121,12 +121,12 @@ export const ApkDownloadPage: React.FC<ApkDownloadPageProps> = ({ onOpenApp }) =
 
         {/* APK Download Button */}
         <a
-          href="https://expo.dev/artifacts/eas/0AuGLI98JjP6rNuaUYyqqYoPxsJjTPcHQoSy_iE81_g.apk"
-          download="WoldWahidSundaySchool.apk"
+          href="https://expo.dev/artifacts/eas/0iCNMDPb0iX_dBuo2QOLip4vcoBTBUUxd9rGBggKKDE.apk"
+          download="WoldWahid.apk"
           className="w-full py-4 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-2xl shadow-lg flex items-center justify-center gap-3 cursor-pointer transition transform active:scale-95 text-sm mt-6"
         >
           <Smartphone className="w-5 h-5" />
-          <span>📱 የሞባይል መተግበሪያውን ያውርዱ (Download Android App)</span>
+          <span>📥 Download Android App (APK) / የሞባይል መተግበሪያውን ያውርዱ</span>
         </a>
 
       </div>

@@ -70,19 +70,20 @@
     break-inside: avoid !important;
     page-break-inside: avoid !important;
     box-shadow: none !important;
-    border: 2px solid #d97706 !important;
+    border: 1.5pt solid #d97706 !important;
     background: #062414 !important;
     color: white !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
-    width: 120mm !important;
-    height: 75mm !important;
-    padding: 16px !important;
+    width: 115mm !important;
+    height: 72mm !important;
+    padding: 14pt !important;
     display: flex !important;
     flex-direction: column !important;
     justify-content: space-between !important;
     box-sizing: border-box !important;
-    border-radius: 16px !important;
+    border-radius: 14pt !important;
+    margin: 8mm auto !important;
   }
 
   .batch-card-item img,
@@ -97,11 +98,11 @@
   /* Specific fix for single card printing */
   #printable-single-badge {
     position: relative !important;
-    margin: 10mm auto !important; /* Reduced top margin to avoid clipping */
-    width: 120mm !important;
-    height: 75mm !important;
+    margin: 30mm auto !important; 
+    width: 105mm !important;
+    height: 66mm !important;
     box-shadow: none !important;
-    border: 2px solid #f59e0b !important;
+    border: 1.5pt solid #f59e0b !important;
     break-inside: avoid !important;
     page-break-inside: avoid !important;
     display: flex !important;
@@ -109,12 +110,14 @@
     justify-content: space-between !important;
     background: #062414 !important;
     color: white !important;
-    border-radius: 16px !important;
-    padding: 16px !important; /* Matched batch padding */
+    border-radius: 12pt !important;
+    padding: 12pt !important;
     box-sizing: border-box !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     overflow: hidden !important;
+    transform: scale(0.98) !important;
+    transform-origin: top center !important;
   }
 
   /* Ensure the single card container doesn't restrict print flow */

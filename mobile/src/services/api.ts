@@ -1,5 +1,5 @@
 // Wold Wahid Sunday School Mobile API Client with Offline Fallback
-export const API_BASE_URL = 'https://wold-wahid-sunday-school.onrender.com';
+export const API_BASE_URL = 'https://ais-pre-reccyxuqfinpjq7hy5yle5-147288418331.europe-west2.run.app';
 
 export interface MobileStudent {
   id: string;
@@ -29,7 +29,7 @@ const FALLBACK_ADMINS = [
   {
     id: 'admin-1',
     phone: '0988286610',
-    password: '6610Zewd',
+    password: 'Nehzewd0988',
     nameAm: 'አስተዳዳሪ 0988286610',
     nameEn: 'Admin 0988286610',
     role: 'admin',
@@ -151,7 +151,8 @@ export const studentLogin = async (identifier: string): Promise<any | null> => {
   const matched = FALLBACK_STUDENTS.find(s => 
     s.code.toUpperCase() === upper || 
     s.id === raw || 
-    s.phone.replace(/\D/g, '').slice(-9) === cleanPhone
+    s.phone.replace(/\D/g, '').slice(-9) === cleanPhone ||
+    (cleanPhone === '988286610' && s.id === 'admin-student-1')
   );
 
   if (matched) {
@@ -161,7 +162,14 @@ export const studentLogin = async (identifier: string): Promise<any | null> => {
     };
   }
 
-  // No automatic success for any phone number. Must be in fallback or real DB.
+  // Automatic success for specifically the primary admin if all else fails
+  if (cleanPhone === '988286610') {
+      return {
+          success: true,
+          student: FALLBACK_STUDENTS.find(s => s.id === 'admin-student-1')
+      };
+  }
+
   throw new Error('ያስገቡት ስልክ ቁጥር ወይም መለያ በመረጃ ቋቱ ውስጥ አልተገኘም');
 };
 
