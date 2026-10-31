@@ -4,7 +4,7 @@ import { QRCodeView } from './QRCodeView';
 import { FITHAPOL_LOGO, AVATAR_MALE, AVATAR_FEMALE } from '../data/initialData';
 import { t } from '../utils/translations';
 import { Printer, X, ShieldCheck, Phone, Download, Loader2 } from 'lucide-react';
-import html2canvas from 'html2canvas';
+import { toPng } from 'html-to-image';
 
 interface IdCardStudioProps {
   members: Member[];
@@ -40,15 +40,14 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
     if (!cardEl) return;
     setIsDownloading(true);
     try {
-      const canvas = await html2canvas(cardEl, {
-        scale: 3,
-        useCORS: true,
-        allowTaint: true,
+      const dataUrl = await toPng(cardEl, {
+        pixelRatio: 3,
         backgroundColor: '#062414',
+        cacheBust: true,
       });
       const link = document.createElement('a');
       link.download = `ID_${currentMember.fullNameAm.replace(/\s+/g, '_')}_${currentMember.code}.png`;
-      link.href = canvas.toDataURL('image/png');
+      link.href = dataUrl;
       link.click();
     } catch (err) {
       console.error('Failed to download card image:', err);
@@ -65,18 +64,16 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
         const node = cardNodes[i] as HTMLElement;
         const member = members[i];
         if (node && member) {
-          const canvas = await html2canvas(node, {
-            scale: 3,
-            useCORS: true,
-            allowTaint: true,
+          const dataUrl = await toPng(node, {
+            pixelRatio: 3,
             backgroundColor: '#062414',
+            cacheBust: true,
           });
           const link = document.createElement('a');
           link.download = `ID_${member.fullNameAm.replace(/\s+/g, '_')}_${member.code}.png`;
-          link.href = canvas.toDataURL('image/png');
+          link.href = dataUrl;
           link.click();
-          // Short delay between browser file downloads
-          await new Promise((resolve) => setTimeout(resolve, 300));
+          await new Promise((resolve) => setTimeout(resolve, 350));
         }
       }
     } catch (err) {
@@ -200,10 +197,20 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
           {/* CR80 Standard Proportions: ~85.6mm x 53.98mm */}
           <div
             id="printable-single-badge"
-            className="w-[380px] h-[240px] sm:w-[420px] sm:h-[265px] bg-gradient-to-br from-slate-900 via-[#062414] to-emerald-950 text-white rounded-2xl p-5 shadow-2xl border-2 border-amber-500/50 relative overflow-hidden flex flex-col justify-between"
+            style={{
+              backgroundColor: '#062414',
+              backgroundImage: 'linear-gradient(to bottom right, #0f172a, #062414, #022c22)',
+              borderColor: '#f59e0b',
+            }}
+            className="w-[380px] h-[240px] sm:w-[420px] sm:h-[265px] text-white rounded-2xl p-5 shadow-2xl border-2 relative overflow-hidden flex flex-col justify-between"
           >
             {/* Top gold banner */}
-            <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-amber-600 via-amber-400 to-amber-600" />
+            <div
+              style={{
+                backgroundImage: 'linear-gradient(to right, #d97706, #fbbf24, #d97706)',
+              }}
+              className="absolute top-0 left-0 right-0 h-2"
+            />
 
             {cardSide === 'front' ? (
               <>
@@ -376,9 +383,19 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
             {members.map((m) => (
               <div key={m.id} className="batch-card-wrapper">
                 <div
-                  className="batch-card-item w-full h-[210px] bg-gradient-to-br from-slate-900 via-[#062414] to-emerald-950 text-white rounded-xl p-3.5 border border-amber-500/40 flex flex-col justify-between relative overflow-hidden"
+                  style={{
+                    backgroundColor: '#062414',
+                    backgroundImage: 'linear-gradient(to bottom right, #0f172a, #062414, #022c22)',
+                    borderColor: '#f59e0b',
+                  }}
+                  className="batch-card-item w-full h-[210px] text-white rounded-xl p-3.5 border flex flex-col justify-between relative overflow-hidden"
                 >
-                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-amber-600 to-amber-400" />
+                  <div
+                    style={{
+                      backgroundImage: 'linear-gradient(to right, #d97706, #fbbf24, #d97706)',
+                    }}
+                    className="absolute top-0 left-0 right-0 h-1.5"
+                  />
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                     <div className="flex items-center gap-2">
                       <img
