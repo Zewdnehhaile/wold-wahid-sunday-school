@@ -1,29 +1,56 @@
 @media print {
-  body {
+  html, body {
     background: white !important;
     color: black !important;
+    height: auto !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
+
   .no-print {
     display: none !important;
   }
+
+  /* Reset fixed modal overlay wrappers so printing flows naturally without viewport clipping */
+  .fixed,
+  [class*="fixed"],
+  [class*="overflow-y-auto"],
+  [class*="max-h-"] {
+    position: static !important;
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
   @page {
     size: A4 portrait;
-    margin: 8mm 12mm;
+    margin: 10mm 15mm;
   }
+
   #batch-print-grid {
     display: flex !important;
     flex-direction: column !important;
     align-items: center !important;
     justify-content: flex-start !important;
-    gap: 12mm !important;
+    gap: 15mm !important;
     background: white !important;
     border: none !important;
     padding: 0 !important;
     margin: 0 !important;
     box-shadow: none !important;
+    width: 100% !important;
   }
+
   .batch-card-wrapper {
     break-inside: avoid !important;
     page-break-inside: avoid !important;
@@ -32,11 +59,13 @@
     display: flex !important;
     justify-content: center !important;
   }
+
   /* Force page break after every 2 cards so max 2 cards (up and down) fit on each page */
   .batch-card-wrapper:nth-child(2n) {
     page-break-after: always !important;
     break-after: page !important;
   }
+
   .batch-card-item {
     break-inside: avoid !important;
     page-break-inside: avoid !important;
@@ -46,8 +75,8 @@
     color: white !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
-    width: 110mm !important;
-    height: 72mm !important;
+    width: 120mm !important;
+    height: 75mm !important;
     padding: 16px !important;
     display: flex !important;
     flex-direction: column !important;
@@ -55,6 +84,7 @@
     box-sizing: border-box !important;
     border-radius: 16px !important;
   }
+
   .batch-card-item img,
   #printable-single-badge img {
     -webkit-print-color-adjust: exact !important;
@@ -64,4 +94,5 @@
     visibility: visible !important;
   }
 }
+
 

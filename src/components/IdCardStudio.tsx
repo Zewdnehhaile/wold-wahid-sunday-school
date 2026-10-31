@@ -256,10 +256,10 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <h5 className="text-sm font-bold text-white truncate font-sans">
+                    <h5 className="text-xs sm:text-sm font-bold text-white leading-tight break-words font-sans">
                       {currentMember.fullNameAm}
                     </h5>
-                    <p className="text-xs text-slate-300 font-medium truncate font-sans">
+                    <p className="text-[11px] sm:text-xs text-slate-300 font-medium leading-tight break-words font-sans mt-0.5">
                       {currentMember.fullNameEn}
                     </p>
 
@@ -378,17 +378,17 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
 
           <div
             id="batch-print-grid"
-            className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-slate-950 rounded-xl border border-slate-800"
+            className="flex flex-col items-center gap-6 p-4 bg-slate-950 rounded-xl border border-slate-800 max-w-2xl mx-auto"
           >
             {members.map((m) => (
-              <div key={m.id} className="batch-card-wrapper">
+              <div key={m.id} className="batch-card-wrapper w-full flex justify-center">
                 <div
                   style={{
                     backgroundColor: '#062414',
                     backgroundImage: 'linear-gradient(to bottom right, #0f172a, #062414, #022c22)',
                     borderColor: '#f59e0b',
                   }}
-                  className="batch-card-item w-full h-[210px] text-white rounded-xl p-3.5 border flex flex-col justify-between relative overflow-hidden"
+                  className="batch-card-item w-[380px] sm:w-[420px] max-w-full h-[240px] text-white rounded-2xl p-4 border flex flex-col justify-between relative overflow-hidden shadow-xl"
                 >
                   <div
                     style={{
@@ -401,39 +401,40 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
                       <img
                         src={FITHAPOL_LOGO}
                         alt="Logo"
-                        className="w-7 h-7 rounded-full border border-amber-400/50"
+                        className="w-8 h-8 rounded-full border border-amber-400/50 object-cover"
                         onError={handleImageError}
                         referrerPolicy="no-referrer"
                       />
-                      <span className="text-[11px] font-bold text-amber-400">የወልድ ዋሕድ ሰ/ት/ቤት</span>
+                      <span className="text-xs font-bold text-amber-400">የወልድ ዋሕድ ሰ/ት/ቤት</span>
                     </div>
-                    <span className="text-[9px] font-mono font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                    <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
                       {m.code}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-3 my-auto">
+                  <div className="flex items-center gap-3.5 my-auto">
                     <img
                       src={m.photoUrl}
                       alt={m.fullNameAm}
-                      className="w-16 h-20 rounded-lg object-cover border border-amber-400/50 shadow-sm shrink-0 bg-slate-900"
+                      className="w-18 h-22 rounded-xl object-cover border border-amber-400/60 shadow-md shrink-0 bg-slate-900"
                       onError={(e) => handleImageError(e, m.gender)}
                       referrerPolicy="no-referrer"
                     />
                     <div className="min-w-0 flex-1">
-                      <h6 className="text-xs font-bold text-white truncate">{m.fullNameAm}</h6>
-                      <p className="text-[10px] text-slate-300 truncate">{m.fullNameEn}</p>
-                      <p className="text-[10px] text-amber-400 mt-1 font-medium">{dict.departments[m.department] || m.department}</p>
-                      <p className="text-[9px] font-mono text-slate-400 mt-0.5">{m.phone}</p>
+                      <h6 className="text-xs font-bold text-white leading-tight break-words font-sans">{m.fullNameAm}</h6>
+                      <p className="text-[11px] text-slate-300 leading-tight break-words font-sans mt-0.5">{m.fullNameEn}</p>
+                      <p className="text-[10px] text-amber-400 mt-1.5 font-medium">{dict.departments[m.department] || m.department}</p>
+                      <p className="text-[10px] font-mono text-slate-300 mt-0.5">{m.phone}</p>
                     </div>
-                    <div className="p-1 bg-white rounded-lg shrink-0">
-                      <QRCodeView value={m.code} size={50} />
+                    <div className="p-1.5 bg-white rounded-xl shrink-0 shadow-sm flex flex-col items-center">
+                      <QRCodeView value={m.code} size={58} />
+                      <span className="text-[7px] font-mono font-bold text-slate-900 mt-0.5">SCAN ID</span>
                     </div>
                   </div>
 
-                  <div className="border-t border-slate-800 pt-1.5 flex items-center justify-between text-[8px] text-slate-400">
+                  <div className="border-t border-slate-800 pt-1.5 flex items-center justify-between text-[9px] text-slate-400">
                     <span>ተመዝግቧል: {m.registeredDate}</span>
-                    <span className="text-amber-400">የአባልነት መታወቂያ</span>
+                    <span className="text-amber-400 font-medium">የአባልነት መታወቂያ</span>
                   </div>
                 </div>
               </div>
