@@ -287,47 +287,49 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
             className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-slate-950 rounded-xl border border-slate-800"
           >
             {members.map((m) => (
-              <div
-                key={m.id}
-                className="w-full h-[210px] bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 text-white rounded-xl p-3.5 border border-amber-500/30 flex flex-col justify-between relative overflow-hidden"
-              >
-                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-amber-600 to-amber-400" />
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <div className="flex items-center gap-2">
+              <div key={m.id} className="batch-card-wrapper">
+                <div
+                  className="batch-card-item w-full h-[210px] bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 text-white rounded-xl p-3.5 border border-amber-500/30 flex flex-col justify-between relative overflow-hidden"
+                >
+                  <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-amber-600 to-amber-400" />
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <div className="flex items-center gap-2">
+                      <img
+                        src={FITHAPOL_LOGO}
+                        alt="Logo"
+                        className="w-7 h-7 rounded-full border border-amber-400/50"
+                        referrerPolicy="no-referrer"
+                      />
+                      <span className="text-[11px] font-bold text-amber-400">የወልድ ዋሕድ ሰ/ት/ቤት</span>
+                    </div>
+                    <span className="text-[9px] font-mono font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                      {m.code}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-3 my-auto">
                     <img
-                      src={FITHAPOL_LOGO}
-                      alt="Logo"
-                      className="w-7 h-7 rounded-full border border-amber-400/50"
+                      src={m.photoUrl}
+                      alt={m.fullNameAm}
+                      className="w-16 h-20 rounded-lg object-cover border border-amber-400/50 shadow-sm shrink-0"
+                      crossOrigin="anonymous"
                       referrerPolicy="no-referrer"
                     />
-                    <span className="text-[11px] font-bold text-amber-400">የወልድ ዋሕድ ሰ/ት/ቤት</span>
+                    <div className="min-w-0 flex-1">
+                      <h6 className="text-xs font-bold text-white truncate">{m.fullNameAm}</h6>
+                      <p className="text-[10px] text-slate-300 truncate">{m.fullNameEn}</p>
+                      <p className="text-[10px] text-amber-400 mt-1 font-medium">{dict.departments[m.department]}</p>
+                      <p className="text-[9px] font-mono text-slate-400 mt-0.5">{m.phone}</p>
+                    </div>
+                    <div className="p-1 bg-white rounded-lg shrink-0">
+                      <QRCodeView value={m.code} size={50} />
+                    </div>
                   </div>
-                  <span className="text-[9px] font-mono font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded">
-                    {m.code}
-                  </span>
-                </div>
 
-                <div className="flex items-center gap-3 my-auto">
-                  <img
-                    src={m.photoUrl}
-                    alt={m.fullNameAm}
-                    className="w-16 h-20 rounded-lg object-cover border border-amber-400/50 shadow-sm shrink-0"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <h6 className="text-xs font-bold text-white truncate">{m.fullNameAm}</h6>
-                    <p className="text-[10px] text-slate-300 truncate">{m.fullNameEn}</p>
-                    <p className="text-[10px] text-amber-400 mt-1 font-medium">{dict.departments[m.department]}</p>
-                    <p className="text-[9px] font-mono text-slate-400 mt-0.5">{m.phone}</p>
+                  <div className="border-t border-slate-800 pt-1.5 flex items-center justify-between text-[8px] text-slate-400">
+                    <span>ተመዝግቧል: {m.registeredDate}</span>
+                    <span className="text-amber-400">የአባልነት መታወቂያ</span>
                   </div>
-                  <div className="p-1 bg-white rounded-lg shrink-0">
-                    <QRCodeView value={m.code} size={50} />
-                  </div>
-                </div>
-
-                <div className="border-t border-slate-800 pt-1.5 flex items-center justify-between text-[8px] text-slate-400">
-                  <span>ተመዝግቧል: {m.registeredDate}</span>
-                  <span className="text-amber-400">የአባልነት መታወቂያ</span>
                 </div>
               </div>
             ))}

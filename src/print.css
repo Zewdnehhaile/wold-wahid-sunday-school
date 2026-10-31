@@ -1,0 +1,47 @@
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+  #batch-print-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    grid-auto-rows: minmax(58mm, auto) !important;
+    gap: 8mm !important;
+    background: white !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .batch-card-wrapper {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    margin-bottom: 8mm !important;
+  }
+  .batch-card-item {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    box-shadow: none !important;
+    border: 1.5px solid #d97706 !important;
+    background: #091f13 !important;
+    color: white !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    width: 92mm !important;
+    height: 58mm !important;
+    padding: 12px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    box-sizing: border-box !important;
+  }
+}
