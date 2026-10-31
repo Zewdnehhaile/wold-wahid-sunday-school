@@ -10,13 +10,13 @@
   }
   @page {
     size: A4 portrait;
-    margin: 8mm;
+    margin: 10mm;
   }
   #batch-print-grid {
     display: grid !important;
     grid-template-columns: repeat(2, 1fr) !important;
-    grid-auto-rows: minmax(58mm, auto) !important;
-    gap: 8mm !important;
+    grid-auto-rows: minmax(70mm, auto) !important;
+    gap: 10mm !important;
     background: white !important;
     border: none !important;
     padding: 0 !important;
@@ -25,14 +25,14 @@
   .batch-card-wrapper {
     break-inside: avoid !important;
     page-break-inside: avoid !important;
-    margin-bottom: 8mm !important;
+    margin-bottom: 10mm !important;
   }
   .batch-card-item {
     break-inside: avoid !important;
     page-break-inside: avoid !important;
     box-shadow: none !important;
     border: 1.5px solid #d97706 !important;
-    background: #091f13 !important;
+    background: #062414 !important;
     color: white !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
@@ -43,5 +43,9 @@
     flex-direction: column !important;
     justify-content: space-between !important;
     box-sizing: border-box !important;
+  }
+  .batch-card-item canvas {
+    background: white !important;
+    display: block !important;
   }
 }
