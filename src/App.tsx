@@ -80,12 +80,22 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('members');
   const [showStudentPortal, setShowStudentPortal] = useState(false);
 
-  // Live Firestore state (no mock data)
-  const [registrations, setRegistrations] = useState<Member[]>([]);
-  const [students, setStudents] = useState<Member[]>([]);
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
-  const [tickets, setTickets] = useState<SupportTicket[]>([]);
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  // Live Firestore state with fallback cache for quota limits
+  const [registrations, setRegistrations] = useState<Member[]>(() => {
+    try { return JSON.parse(localStorage.getItem('ww_registrations_cache') || '[]'); } catch { return []; }
+  });
+  const [students, setStudents] = useState<Member[]>(() => {
+    try { return JSON.parse(localStorage.getItem('ww_students_cache') || '[]'); } catch { return []; }
+  });
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => {
+    try { return JSON.parse(localStorage.getItem('ww_attendance_cache') || '[]'); } catch { return []; }
+  });
+  const [tickets, setTickets] = useState<SupportTicket[]>(() => {
+    try { return JSON.parse(localStorage.getItem('ww_tickets_cache') || '[]'); } catch { return []; }
+  });
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(() => {
+    try { return JSON.parse(localStorage.getItem('ww_leave_cache') || '[]'); } catch { return []; }
+  });
 
   const [sessions] = useState<ServiceSession[]>(INITIAL_SESSIONS);
   const [activeSession, setActiveSession] = useState<ServiceSession>(INITIAL_SESSIONS[0]);
@@ -144,6 +154,7 @@ export default function App() {
           };
         });
         setRegistrations(regList);
+        try { localStorage.setItem('ww_registrations_cache', JSON.stringify(regList)); } catch {}
       },
       handleSnapshotError('Registrations')
     );
@@ -184,6 +195,7 @@ export default function App() {
         };
       });
       setStudents(studentList);
+      try { localStorage.setItem('ww_students_cache', JSON.stringify(studentList)); } catch {}
     }, handleSnapshotError('Students'));
 
     // 3. Listen to real-time support tickets (Recent 50)
@@ -207,6 +219,7 @@ export default function App() {
         };
       });
       setTickets(ticketList);
+      try { localStorage.setItem('ww_tickets_cache', JSON.stringify(ticketList)); } catch {}
     }, handleSnapshotError('Support tickets'));
 
     // 4. Listen to real-time attendance logs (Only last 7 days to save quota)
@@ -234,6 +247,7 @@ export default function App() {
           };
         });
         setAttendance(attList);
+        try { localStorage.setItem('ww_attendance_cache', JSON.stringify(attList)); } catch {}
       }, handleSnapshotError('Attendance')
     );
 
@@ -254,6 +268,7 @@ export default function App() {
         };
       });
       setLeaveRequests(list);
+      try { localStorage.setItem('ww_leave_cache', JSON.stringify(list)); } catch {}
     }, handleSnapshotError('Leave requests'));
 
     // 6. Real-time push notification receiver (capped to 20 most recent)
