@@ -350,13 +350,13 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
           </div>
         </div>
       ) : (
-        /* Batch A4 Print View: 4 Cards Grid (2 cols x 2 rows per page) */
+        /* Batch A4 Print View: 2 Cards Vertical Stack (1 col x 2 rows per page) */
         <div className="w-full max-w-4xl bg-slate-900 p-6 rounded-2xl border border-slate-800 overflow-y-auto max-h-[75vh]">
           <div className="no-print mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-300 text-xs flex items-center justify-between">
             <span>
               {lang === 'am'
-                ? 'የ A4 ማተሚያ ገጽታ፦ በአንድ ገጽ 4 መታወቂያዎች (side-by-side) ተዘጋጅተዋል።'
-                : 'A4 Print Layout: 4 cards per page formatted side-by-side.'}
+                ? 'የ A4 ማተሚያ ገጽታ፦ በአንድ ገጽ 2 መታወቂያዎች (ከላይ እና ከታች) ተዘጋጅተዋል።'
+                : 'A4 Print Layout: 2 cards per page (stacked top and bottom).'}
             </span>
             <div className="flex items-center gap-2">
               <button

@@ -10,42 +10,58 @@
   }
   @page {
     size: A4 portrait;
-    margin: 10mm;
+    margin: 8mm 12mm;
   }
   #batch-print-grid {
-    display: grid !important;
-    grid-template-columns: repeat(2, 1fr) !important;
-    grid-auto-rows: minmax(70mm, auto) !important;
-    gap: 10mm !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 12mm !important;
     background: white !important;
     border: none !important;
     padding: 0 !important;
     margin: 0 !important;
+    box-shadow: none !important;
   }
   .batch-card-wrapper {
     break-inside: avoid !important;
     page-break-inside: avoid !important;
-    margin-bottom: 10mm !important;
+    margin-bottom: 0 !important;
+    width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
+  }
+  /* Force page break after every 2 cards so max 2 cards (up and down) fit on each page */
+  .batch-card-wrapper:nth-child(2n) {
+    page-break-after: always !important;
+    break-after: page !important;
   }
   .batch-card-item {
     break-inside: avoid !important;
     page-break-inside: avoid !important;
     box-shadow: none !important;
-    border: 1.5px solid #d97706 !important;
+    border: 2px solid #d97706 !important;
     background: #062414 !important;
     color: white !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
-    width: 92mm !important;
-    height: 58mm !important;
-    padding: 12px !important;
+    width: 110mm !important;
+    height: 72mm !important;
+    padding: 16px !important;
     display: flex !important;
     flex-direction: column !important;
     justify-content: space-between !important;
     box-sizing: border-box !important;
+    border-radius: 16px !important;
   }
-  .batch-card-item canvas {
-    background: white !important;
+  .batch-card-item img,
+  #printable-single-badge img {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
     display: block !important;
+    opacity: 1 !important;
+    visibility: visible !important;
   }
 }
+

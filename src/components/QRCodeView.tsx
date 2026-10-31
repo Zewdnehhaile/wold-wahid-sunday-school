@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 
 interface QRCodeViewProps {
@@ -16,29 +16,49 @@ export const QRCodeView: React.FC<QRCodeViewProps> = ({
   darkColor = '#0F172A',
   lightColor = '#FFFFFF',
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [dataUrl, setDataUrl] = useState<string>('');
 
   useEffect(() => {
-    if (canvasRef.current && value) {
-      QRCode.toCanvas(canvasRef.current, value, {
-        width: size,
+    if (value) {
+      // Use 3x size multiplier for crystal clear print & high-DPI export
+      QRCode.toDataURL(value, {
+        width: Math.max(size * 3, 240),
         margin: 1,
         color: {
           dark: darkColor,
           light: lightColor,
         },
         errorCorrectionLevel: 'M',
-      }).catch((err: any) => {
-        console.error('Error rendering QR code:', err);
-      });
+      })
+        .then((url) => setDataUrl(url))
+        .catch((err: any) => {
+          console.error('Error rendering QR code:', err);
+        });
     }
   }, [value, size, darkColor, lightColor]);
 
+  if (!dataUrl) {
+    return (
+      <div
+        className={`bg-white rounded-lg flex items-center justify-center ${className}`}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+
   return (
-    <canvas
-      ref={canvasRef}
-      className={`rounded-lg shadow-xs ${className}`}
-      style={{ width: size, height: size }}
+    <img
+      src={dataUrl}
+      alt={`QR-${value}`}
+      className={`rounded-lg shadow-xs object-contain print:inline-block ${className}`}
+      style={{
+        width: size,
+        height: size,
+        minWidth: size,
+        minHeight: size,
+        backgroundColor: lightColor,
+      }}
     />
   );
 };
+
