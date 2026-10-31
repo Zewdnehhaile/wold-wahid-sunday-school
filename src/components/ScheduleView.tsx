@@ -10,6 +10,8 @@ import {
   doc,
   deleteDoc,
   serverTimestamp,
+  query,
+  limit,
 } from 'firebase/firestore';
 import {
   Calendar,
@@ -72,7 +74,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 
   // Firestore sync listener
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'schedules'), (snapshot) => {
+    const unsub = onSnapshot(query(collection(db, 'schedules'), limit(50)), (snapshot) => {
       if (!snapshot.empty) {
         const fetched: ScheduleItem[] = snapshot.docs.map((docSnap) => {
           const d = docSnap.data();

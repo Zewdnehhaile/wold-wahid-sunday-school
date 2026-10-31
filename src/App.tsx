@@ -420,7 +420,7 @@ export default function App() {
           }));
         }
       }
-    });
+    }, handleSnapshotError('Admin session'));
     return () => unsub();
   }, [isLoggedIn, currentAdmin.id]);
   const handleAddMember = async (newMember: Member) => {

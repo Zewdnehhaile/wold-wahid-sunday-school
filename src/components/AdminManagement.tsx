@@ -3,7 +3,7 @@ import { AdminUser, SundaySchoolDepartment, Language, UserRole } from '../types'
 import { t } from '../utils/translations';
 import { AVATAR_MALE } from '../data/initialData';
 import { db } from '../firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDocs, query, limit } from 'firebase/firestore';
 import {
   ShieldCheck,
   UserPlus,
@@ -82,7 +82,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
   // Real-time Firestore synchronization for administrators from live database
   useEffect(() => {
     const unsub = onSnapshot(
-      collection(db, 'admins'),
+      query(collection(db, 'admins'), limit(50)),
       (snap) => {
         const loaded: DetailedAdmin[] = snap.docs.map((docSnap) => {
           const d = docSnap.data();
