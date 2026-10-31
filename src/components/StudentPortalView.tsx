@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Member, AttendanceRecord, Language, SundaySchoolDepartment } from '../types';
 import { WOLD_WAHID_LOGO, WOLD_WAHID_SCHEDULE } from '../data/initialData';
 import { formatEthiopianDate } from '../utils/ethiopianCalendar';
+import { getPhotoUrl } from '../utils/photoUtils';
 import { db } from '../firebase';
 import { collection, addDoc } from 'firebase/firestore';
 import {
@@ -104,7 +105,7 @@ export const StudentPortalView: React.FC<StudentPortalViewProps> = ({
           gradeLevel: data.gradeLevel || 'general',
           roleAm: 'ተማሪ / Student',
           roleEn: 'Student',
-          photoUrl: data.photoUrl || '',
+          photoUrl: getPhotoUrl(data.photoUrl, data.gender === 'female' ? 'female' : 'male'),
           registeredDate: data.registeredDate || new Date().toISOString().split('T')[0],
           bloodGroup: data.bloodGroup || 'O+',
           emergencyContact: data.emergencyContact || { name: '', phone: '', relation: '' },
@@ -329,10 +330,14 @@ Leave Request Submitted!
                     <div className="absolute -inset-1 bg-amber-500/30 rounded-full blur"></div>
                     <div className="relative w-24 h-24 rounded-full border-2 border-amber-400 mx-auto overflow-hidden bg-emerald-950 shadow-2xl">
                       <img 
-                        src={selectedStudent.photoUrl || WOLD_WAHID_LOGO} 
+                        src={getPhotoUrl(selectedStudent.photoUrl, selectedStudent.gender)} 
                         alt="Student" 
                         className="w-full h-full object-cover" 
-                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          e.currentTarget.onerror = null;
+                          const placeholder = selectedStudent.gender === 'female' ? '/assets/aistudio/AVATAR_FEMALE.png' : '/assets/aistudio/AVATAR_MALE.png';
+                          e.currentTarget.src = placeholder;
+                        }}
                       />
                     </div>
                   </div>

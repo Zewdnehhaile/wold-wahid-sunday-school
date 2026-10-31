@@ -5,6 +5,7 @@ import { FITHAPOL_LOGO, AVATAR_MALE, AVATAR_FEMALE } from '../data/initialData';
 import { t } from '../utils/translations';
 import { Printer, X, ShieldCheck, Phone, Download, Loader2 } from 'lucide-react';
 import { toPng } from 'html-to-image';
+import { getPhotoUrl } from '../utils/photoUtils';
 
 interface IdCardStudioProps {
   members: Member[];
@@ -222,7 +223,6 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
                       alt="Logo"
                       className="w-10 h-10 rounded-full border border-amber-400/50 object-cover shadow-sm"
                       onError={handleImageError}
-                      referrerPolicy="no-referrer"
                     />
                     <div>
                       <h4 className="text-xs font-bold tracking-tight text-amber-400 font-sans">
@@ -244,11 +244,10 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
                 <div className="flex items-center gap-4 my-auto">
                   <div className="relative shrink-0">
                     <img
-                      src={currentMember.photoUrl}
+                      src={getPhotoUrl(currentMember.photoUrl, currentMember.gender)}
                       alt={currentMember.fullNameAm}
                       className="w-20 h-24 rounded-xl object-cover border-2 border-amber-400/60 shadow-md bg-slate-900"
                       onError={(e) => handleImageError(e, currentMember.gender)}
-                      referrerPolicy="no-referrer"
                     />
                     <span className="absolute bottom-1 right-1 text-[9px] font-bold px-1 py-0.5 rounded bg-slate-950/80 text-amber-300 border border-amber-400/40">
                       {currentMember.bloodGroup || 'O+'}
@@ -414,11 +413,10 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
 
                   <div className="flex items-center gap-3.5 my-auto">
                     <img
-                      src={m.photoUrl}
+                      src={getPhotoUrl(m.photoUrl, m.gender)}
                       alt={m.fullNameAm}
                       className="w-18 h-22 rounded-xl object-cover border border-amber-400/60 shadow-md shrink-0 bg-slate-900"
                       onError={(e) => handleImageError(e, m.gender)}
-                      referrerPolicy="no-referrer"
                     />
                     <div className="min-w-0 flex-1">
                       <h6 className="text-xs font-bold text-white leading-tight break-words font-sans">{m.fullNameAm}</h6>

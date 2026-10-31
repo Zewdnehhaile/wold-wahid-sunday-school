@@ -97,7 +97,7 @@
   /* Specific fix for single card printing */
   #printable-single-badge {
     position: relative !important;
-    margin: 20mm auto !important;
+    margin: 10mm auto !important; /* Reduced top margin to avoid clipping */
     width: 120mm !important;
     height: 75mm !important;
     box-shadow: none !important;
@@ -110,9 +110,11 @@
     background: #062414 !important;
     color: white !important;
     border-radius: 16px !important;
-    padding: 20px !important;
+    padding: 16px !important; /* Matched batch padding */
     box-sizing: border-box !important;
     -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    overflow: hidden !important;
   }
 
   /* Ensure the single card container doesn't restrict print flow */

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Member, Department, GradeLevel, UserRole, Language } from '../types';
 import { t } from '../utils/translations';
 import { AVATAR_MALE, AVATAR_FEMALE } from '../data/initialData';
+import { getPhotoUrl } from '../utils/photoUtils';
 import { QRCodeView } from './QRCodeView';
 import {
   Search,
@@ -357,14 +358,13 @@ export const MemberList: React.FC<MemberListProps> = ({
                     <td className="py-3 px-4 cursor-pointer" onClick={() => setSelectedMember(member)}>
                       <div className="flex items-center gap-3">
                         <img
-                          src={member.photoUrl}
+                          src={getPhotoUrl(member.photoUrl, member.gender)}
                           alt={member.fullNameAm}
                           className="w-10 h-10 rounded-xl object-cover border border-slate-700 shrink-0 bg-slate-900"
                           onError={(e) => {
                             e.currentTarget.onerror = null;
                             e.currentTarget.src = member.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE;
                           }}
-                          referrerPolicy="no-referrer"
                         />
                         <div className="min-w-0">
                           <p className="font-semibold text-slate-100 truncate">
@@ -519,10 +519,13 @@ export const MemberList: React.FC<MemberListProps> = ({
               {/* Student Summary */}
               <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center gap-3">
                 <img
-                  src={approvingMember.photoUrl}
+                  src={getPhotoUrl(approvingMember.photoUrl, approvingMember.gender)}
                   alt={approvingMember.fullNameAm}
                   className="w-12 h-12 rounded-xl object-cover border border-amber-400 shrink-0"
-                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = approvingMember.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE;
+                  }}
                 />
                 <div className="min-w-0">
                   <h4 className="font-bold text-white truncate text-sm">
