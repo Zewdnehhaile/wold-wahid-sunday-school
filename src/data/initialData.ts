@@ -2,8 +2,8 @@ import { Member, SupportTicket, AttendanceRecord, ServiceSession, ScheduleItem, 
 
 export const FITHAPOL_LOGO = '/assets/aistudio/image_6d91f294.png';
 export const WOLD_WAHID_LOGO = '/assets/aistudio/image_6d91f294.png';
-export const AVATAR_MALE = '/src/assets/images/member_avatar_male_1792165917472.jpg';
-export const AVATAR_FEMALE = '/src/assets/images/member_avatar_female_1792165932811.jpg';
+export const AVATAR_MALE = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="%231e293b"/><path d="M50 42a16 16 0 1 0 0-32 16 16 0 0 0 0 32zm0 8c-18 0-36 10-36 26v4h72v-4c0-16-18-26-36-26z" fill="%23f59e0b"/></svg>';
+export const AVATAR_FEMALE = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" fill="%231e293b"/><path d="M50 42a16 16 0 1 0 0-32 16 16 0 0 0 0 32zm0 8c-18 0-36 10-36 26v4h72v-4c0-16-18-26-36-26z" fill="%23ec4899"/></svg>';
 
 // Complete Wold Wahid Sunday School Schedule
 export const WOLD_WAHID_SCHEDULE: ScheduleItem[] = [

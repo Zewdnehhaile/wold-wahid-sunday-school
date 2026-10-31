@@ -359,7 +359,11 @@ export const MemberList: React.FC<MemberListProps> = ({
                         <img
                           src={member.photoUrl}
                           alt={member.fullNameAm}
-                          className="w-10 h-10 rounded-xl object-cover border border-slate-700 shrink-0"
+                          className="w-10 h-10 rounded-xl object-cover border border-slate-700 shrink-0 bg-slate-900"
+                          onError={(e) => {
+                            e.currentTarget.onerror = null;
+                            e.currentTarget.src = member.gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE;
+                          }}
                           referrerPolicy="no-referrer"
                         />
                         <div className="min-w-0">

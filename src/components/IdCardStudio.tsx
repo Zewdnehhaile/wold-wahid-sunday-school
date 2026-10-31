@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Member, Language } from '../types';
 import { QRCodeView } from './QRCodeView';
-import { FITHAPOL_LOGO } from '../data/initialData';
+import { FITHAPOL_LOGO, AVATAR_MALE, AVATAR_FEMALE } from '../data/initialData';
 import { t } from '../utils/translations';
-import { Printer, X, Eye, Layers, ShieldCheck, Phone, Heart } from 'lucide-react';
+import { Printer, X, ShieldCheck, Phone, Download, Loader2 } from 'lucide-react';
+import html2canvas from 'html2canvas';
 
 interface IdCardStudioProps {
   members: Member[];
@@ -21,6 +22,7 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
   const [activeTab, setActiveTab] = useState<'single' | 'batch'>('single');
   const [currentMember, setCurrentMember] = useState<Member>(selectedMember || members[0]);
   const [cardSide, setCardSide] = useState<'front' | 'back'>('front');
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const dict = t[lang];
 
@@ -28,11 +30,67 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
     window.print();
   };
 
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>, gender?: 'male' | 'female') => {
+    e.currentTarget.onerror = null;
+    e.currentTarget.src = gender === 'female' ? AVATAR_FEMALE : AVATAR_MALE;
+  };
+
+  const downloadSingleCard = async () => {
+    const cardEl = document.getElementById('printable-single-badge');
+    if (!cardEl) return;
+    setIsDownloading(true);
+    try {
+      const canvas = await html2canvas(cardEl, {
+        scale: 3,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#062414',
+      });
+      const link = document.createElement('a');
+      link.download = `ID_${currentMember.fullNameAm.replace(/\s+/g, '_')}_${currentMember.code}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    } catch (err) {
+      console.error('Failed to download card image:', err);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const downloadAllCards = async () => {
+    setIsDownloading(true);
+    try {
+      const cardNodes = document.querySelectorAll('.batch-card-item');
+      for (let i = 0; i < cardNodes.length; i++) {
+        const node = cardNodes[i] as HTMLElement;
+        const member = members[i];
+        if (node && member) {
+          const canvas = await html2canvas(node, {
+            scale: 3,
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: '#062414',
+          });
+          const link = document.createElement('a');
+          link.download = `ID_${member.fullNameAm.replace(/\s+/g, '_')}_${member.code}.png`;
+          link.href = canvas.toDataURL('image/png');
+          link.click();
+          // Short delay between browser file downloads
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+    } catch (err) {
+      console.error('Failed to batch download cards:', err);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   if (!currentMember) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center p-4 overflow-y-auto">
-      {/* Non-print control bar */}
+      {/* Control bar */}
       <div className="no-print bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl p-4 mb-4 flex flex-wrap items-center justify-between gap-4 shadow-2xl">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
@@ -48,8 +106,8 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
           </div>
         </div>
 
-        {/* View toggles */}
-        <div className="flex items-center gap-2">
+        {/* View toggles & actions */}
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="bg-slate-800/80 p-1 rounded-xl flex items-center text-xs">
             <button
               onClick={() => setActiveTab('single')}
@@ -98,9 +156,30 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
             </div>
           )}
 
+          {/* PNG Download Action Button */}
+          {activeTab === 'single' ? (
+            <button
+              onClick={downloadSingleCard}
+              disabled={isDownloading}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold shadow-lg shadow-amber-500/20 transition-colors disabled:opacity-60 cursor-pointer"
+            >
+              {isDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              <span>{lang === 'am' ? 'ካርድ በ PNG አውርድ' : 'Download PNG'}</span>
+            </button>
+          ) : (
+            <button
+              onClick={downloadAllCards}
+              disabled={isDownloading}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold shadow-lg shadow-amber-500/20 transition-colors disabled:opacity-60 cursor-pointer"
+            >
+              {isDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              <span>{lang === 'am' ? 'ሁሉንም በ PNG አውርድ' : 'Download All PNGs'}</span>
+            </button>
+          )}
+
           <button
             onClick={handlePrint}
-            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/20 transition-colors"
+            className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/20 transition-colors"
           >
             <Printer className="w-4 h-4" />
             <span>{dict.idCard.printBtn}</span>
@@ -118,12 +197,12 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
       {/* Main Preview Area */}
       {activeTab === 'single' ? (
         <div className="flex flex-col items-center justify-center p-6 w-full max-w-xl">
-          {/* CR80 Standard Proportions: ~85.6mm x 53.98mm (Aspect 1.586) */}
+          {/* CR80 Standard Proportions: ~85.6mm x 53.98mm */}
           <div
             id="printable-single-badge"
-            className="w-[380px] h-[240px] sm:w-[420px] sm:h-[265px] bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 text-white rounded-2xl p-5 shadow-2xl border border-amber-500/40 relative overflow-hidden flex flex-col justify-between"
+            className="w-[380px] h-[240px] sm:w-[420px] sm:h-[265px] bg-gradient-to-br from-slate-900 via-[#062414] to-emerald-950 text-white rounded-2xl p-5 shadow-2xl border-2 border-amber-500/50 relative overflow-hidden flex flex-col justify-between"
           >
-            {/* Top decorative gold banner */}
+            {/* Top gold banner */}
             <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-amber-600 via-amber-400 to-amber-600" />
 
             {cardSide === 'front' ? (
@@ -133,8 +212,9 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
                   <div className="flex items-center gap-2.5">
                     <img
                       src={FITHAPOL_LOGO}
-                      alt="FithaPol Logo"
+                      alt="Logo"
                       className="w-10 h-10 rounded-full border border-amber-400/50 object-cover shadow-sm"
+                      onError={handleImageError}
                       referrerPolicy="no-referrer"
                     />
                     <div>
@@ -150,9 +230,6 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
                     <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-mono font-bold border border-amber-500/30">
                       {currentMember.code}
                     </span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-emerald-500/25 text-emerald-300 font-mono font-bold border border-emerald-500/30" title="የአባሉ ተራ ቁጥር">
-                      ተ.ቁ #{Math.max(1, members.findIndex(m => m.id === currentMember.id) + 1)}
-                    </span>
                   </div>
                 </div>
 
@@ -162,11 +239,12 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
                     <img
                       src={currentMember.photoUrl}
                       alt={currentMember.fullNameAm}
-                      className="w-20 h-24 rounded-xl object-cover border-2 border-amber-400/60 shadow-md"
+                      className="w-20 h-24 rounded-xl object-cover border-2 border-amber-400/60 shadow-md bg-slate-900"
+                      onError={(e) => handleImageError(e, currentMember.gender)}
                       referrerPolicy="no-referrer"
                     />
                     <span className="absolute bottom-1 right-1 text-[9px] font-bold px-1 py-0.5 rounded bg-slate-950/80 text-amber-300 border border-amber-400/40">
-                      {currentMember.bloodGroup}
+                      {currentMember.bloodGroup || 'O+'}
                     </span>
                   </div>
 
@@ -181,7 +259,7 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
                     <div className="mt-2 space-y-1 text-[11px] text-slate-300">
                       <div className="flex items-center gap-1.5">
                         <span className="text-amber-400 font-medium">ክፍል:</span>
-                        <span className="text-slate-200">{dict.departments[currentMember.department]}</span>
+                        <span className="text-slate-200">{dict.departments[currentMember.department] || currentMember.department}</span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <span className="text-amber-400 font-medium">ስልክ:</span>
@@ -202,7 +280,6 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
                 {/* Footer Strip */}
                 <div className="border-t border-slate-800/80 pt-2 flex items-center justify-between text-[9px] text-slate-400">
                   <span>ተመዝግቧል: {currentMember.registeredDate}</span>
-                  <span className="text-amber-400 font-mono font-bold">ተ.ቁ #{Math.max(1, members.findIndex(m => m.id === currentMember.id) + 1)}</span>
                   <span className="text-amber-400/80 font-medium">የአባልነት መታወቂያ</span>
                 </div>
               </>
@@ -266,20 +343,30 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
           </div>
         </div>
       ) : (
-        /* Batch A4 Print View: 8 Cards Grid (2 cols x 4 rows) */
+        /* Batch A4 Print View: 4 Cards Grid (2 cols x 2 rows per page) */
         <div className="w-full max-w-4xl bg-slate-900 p-6 rounded-2xl border border-slate-800 overflow-y-auto max-h-[75vh]">
           <div className="no-print mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-300 text-xs flex items-center justify-between">
             <span>
               {lang === 'am'
-                ? 'የ A4 ወረቀት ማተሚያ ገጽታ፡ 8 አባላትን በአንድ ወረቀት ላይ ለማተም የተዘጋጀ።'
-                : 'A4 Sheet Print Preview: Formatted with 8 cards per page ready for standard color printing.'}
+                ? 'የ A4 ማተሚያ ገጽታ፦ በአንድ ገጽ 4 መታወቂያዎች (side-by-side) ተዘጋጅተዋል።'
+                : 'A4 Print Layout: 4 cards per page formatted side-by-side.'}
             </span>
-            <button
-              onClick={handlePrint}
-              className="px-3 py-1 bg-amber-500 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1"
-            >
-              <Printer className="w-3.5 h-3.5" /> {dict.idCard.printBtn}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={downloadAllCards}
+                disabled={isDownloading}
+                className="px-3 py-1 bg-amber-500 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                {isDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                <span>{lang === 'am' ? 'ሁሉንም በ PNG አውርድ' : 'Download All PNGs'}</span>
+              </button>
+              <button
+                onClick={handlePrint}
+                className="px-3 py-1 bg-emerald-600 text-white font-bold rounded-lg text-xs flex items-center gap-1"
+              >
+                <Printer className="w-3.5 h-3.5" /> {dict.idCard.printBtn}
+              </button>
+            </div>
           </div>
 
           <div
@@ -289,7 +376,7 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
             {members.map((m) => (
               <div key={m.id} className="batch-card-wrapper">
                 <div
-                  className="batch-card-item w-full h-[210px] bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950 text-white rounded-xl p-3.5 border border-amber-500/30 flex flex-col justify-between relative overflow-hidden"
+                  className="batch-card-item w-full h-[210px] bg-gradient-to-br from-slate-900 via-[#062414] to-emerald-950 text-white rounded-xl p-3.5 border border-amber-500/40 flex flex-col justify-between relative overflow-hidden"
                 >
                   <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-amber-600 to-amber-400" />
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
@@ -298,6 +385,7 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
                         src={FITHAPOL_LOGO}
                         alt="Logo"
                         className="w-7 h-7 rounded-full border border-amber-400/50"
+                        onError={handleImageError}
                         referrerPolicy="no-referrer"
                       />
                       <span className="text-[11px] font-bold text-amber-400">የወልድ ዋሕድ ሰ/ት/ቤት</span>
@@ -311,14 +399,14 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
                     <img
                       src={m.photoUrl}
                       alt={m.fullNameAm}
-                      className="w-16 h-20 rounded-lg object-cover border border-amber-400/50 shadow-sm shrink-0"
-                      crossOrigin="anonymous"
+                      className="w-16 h-20 rounded-lg object-cover border border-amber-400/50 shadow-sm shrink-0 bg-slate-900"
+                      onError={(e) => handleImageError(e, m.gender)}
                       referrerPolicy="no-referrer"
                     />
                     <div className="min-w-0 flex-1">
                       <h6 className="text-xs font-bold text-white truncate">{m.fullNameAm}</h6>
                       <p className="text-[10px] text-slate-300 truncate">{m.fullNameEn}</p>
-                      <p className="text-[10px] text-amber-400 mt-1 font-medium">{dict.departments[m.department]}</p>
+                      <p className="text-[10px] text-amber-400 mt-1 font-medium">{dict.departments[m.department] || m.department}</p>
                       <p className="text-[9px] font-mono text-slate-400 mt-0.5">{m.phone}</p>
                     </div>
                     <div className="p-1 bg-white rounded-lg shrink-0">
