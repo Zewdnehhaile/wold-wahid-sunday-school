@@ -381,12 +381,41 @@ export async function findStudentOrRegistrationByPhone(phoneInput: string): Prom
   return null;
 }
 
-// In-memory deduplication caches to eliminate repeating messages
+// In-memory deduplication caches and per-user execution locks to eliminate race conditions & repeating messages
 const processedUpdateIds = new Set<number>();
 const processedMessageKeys = new Set<string>();
+const userLocks = new Map<string, Promise<any>>();
 
-// Process update for webhook or polling
+// Process update for webhook or polling with per-user mutex locking
 export async function handleTelegramUpdate(update: any) {
+  if (!update || typeof update !== 'object') return;
+
+  const msg = update.message || update.edited_message;
+  const telegramId = msg?.from?.id || update.callback_query?.from?.id;
+  if (!telegramId) {
+    return handleTelegramUpdateInner(update);
+  }
+
+  const lockKey = String(telegramId);
+  const previousLock = userLocks.get(lockKey) || Promise.resolve();
+  let releaseLock!: () => void;
+  const nextLock = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+  userLocks.set(lockKey, nextLock);
+
+  await previousLock;
+  try {
+    await handleTelegramUpdateInner(update);
+  } finally {
+    releaseLock();
+    if (userLocks.get(lockKey) === nextLock) {
+      userLocks.delete(lockKey);
+    }
+  }
+}
+
+async function handleTelegramUpdateInner(update: any) {
   if (!update || typeof update !== 'object') return;
 
   const updateId = update.update_id;
