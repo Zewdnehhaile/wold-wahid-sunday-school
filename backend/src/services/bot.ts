@@ -14,7 +14,7 @@ export interface UserSession {
   data: Record<string, any>;
 }
 
-export const userSessions = new Map<number, UserSession>();
+export const userSessions = new Map<string, UserSession>();
 
 export const mainMenuKeyboard = {
   reply_markup: {
@@ -195,40 +195,73 @@ export async function dispatchSendMessage(chatId: number | string, text: string,
   }
 }
 
-// Session helper syncs to local map and dedicated bot_sessions collection
-export async function getSession(telegramId: number): Promise<UserSession | null> {
-  if (userSessions.has(telegramId)) {
-    return userSessions.get(telegramId)!;
+// Session helper syncs to local map and persistent database storage
+export async function getSession(telegramId: number | string): Promise<UserSession | null> {
+  const key = String(telegramId);
+  if (userSessions.has(key)) {
+    return userSessions.get(key)!;
   }
   try {
-    const docSnap = await db.collection('bot_sessions').doc(String(telegramId)).get();
+    const docSnap = await db.collection('bot_sessions').doc(key).get();
     if (docSnap.exists) {
-      const sess = docSnap.data() as UserSession;
-      if (sess && sess.action && sess.step) {
-        userSessions.set(telegramId, sess);
+      const data = docSnap.data();
+      if (data && data.action && data.step) {
+        const sess: UserSession = {
+          action: data.action,
+          step: data.step,
+          data: data.data || {},
+        };
+        userSessions.set(key, sess);
         return sess;
       }
     }
   } catch (err) {
-    console.warn('Failed to fetch session from db:', err);
+    console.warn('Failed to fetch session from bot_sessions:', err);
   }
+  // Secondary fallback to bot_subscribers
+  try {
+    const subSnap = await db.collection('bot_subscribers').doc(key).get();
+    if (subSnap.exists) {
+      const data = subSnap.data();
+      const sess = data?.session || data?.data?.session;
+      if (sess && sess.action && sess.step) {
+        userSessions.set(key, sess);
+        return sess;
+      }
+    }
+  } catch {}
   return null;
 }
 
-export async function setSession(telegramId: number, session: UserSession | null) {
+export async function setSession(telegramId: number | string, session: UserSession | null) {
+  const key = String(telegramId);
   if (session) {
-    userSessions.set(telegramId, session);
+    userSessions.set(key, { ...session });
   } else {
-    userSessions.delete(telegramId);
+    userSessions.delete(key);
   }
   try {
     if (session) {
-      await db.collection('bot_sessions').doc(String(telegramId)).set({
-        ...session,
-        updatedAt: new Date().toISOString(),
-      });
+      await Promise.all([
+        db.collection('bot_sessions').doc(key).set({
+          action: session.action,
+          step: session.step,
+          data: session.data || {},
+          updatedAt: new Date().toISOString(),
+        }),
+        db.collection('bot_subscribers').doc(key).set({
+          session: session,
+          lastActiveAt: new Date().toISOString(),
+        }, { merge: true }),
+      ]);
     } else {
-      await db.collection('bot_sessions').doc(String(telegramId)).delete().catch(() => {});
+      await Promise.all([
+        db.collection('bot_sessions').doc(key).delete().catch(() => {}),
+        db.collection('bot_subscribers').doc(key).set({
+          session: null,
+          lastActiveAt: new Date().toISOString(),
+        }, { merge: true }).catch(() => {}),
+      ]);
     }
   } catch (err) {
     console.warn('Failed to sync session to db:', err);
