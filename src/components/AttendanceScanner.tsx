@@ -258,11 +258,21 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
     }
   };
 
-  const currentAttendance = attendance.filter((a) => a.sessionName === activeSession.nameAm);
-  const presentRecords = currentAttendance.filter(a => a.status !== 'absent');
+  const todayIso = new Date().toISOString().split('T')[0];
+  const [dateFrom, setDateFrom] = useState(todayIso);
+  const [dateTo, setDateTo] = useState(todayIso);
+
+  const filteredAttendance = attendance.filter((a) => {
+    const aDate = a.date || todayIso;
+    const matchSession = a.sessionName === activeSession.nameAm;
+    const matchDate = (!dateFrom || aDate >= dateFrom) && (!dateTo || aDate <= dateTo);
+    return matchSession && matchDate;
+  });
+
+  const presentRecords = filteredAttendance.filter(a => a.status !== 'absent');
   const absentees = members.filter(m => 
     m.status === 'active' && 
-    !currentAttendance.some(a => a.memberId === m.id)
+    !filteredAttendance.some(a => a.memberId === m.id)
   );
 
   const handleExportAttendanceCSV = () => {
@@ -338,7 +348,8 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
     const link = document.createElement('a');
     link.href = url;
     const cleanSessionName = activeSession.nameAm.replace(/[\s\/\\]+/g, '_');
-    link.setAttribute('download', `የመገኘት_ዝርዝር_${cleanSessionName}_${todayDate}.csv`);
+    const dateRangeLabel = dateFrom && dateTo ? `${dateFrom}_እስከ_${dateTo}` : (dateFrom ? `ከ_${dateFrom}` : todayDate);
+    link.setAttribute('download', `የመገኘት_ዝርዝር_${cleanSessionName}_${dateRangeLabel}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -512,6 +523,43 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
               <p className="text-[10px] text-emerald-200/60 uppercase font-black tracking-widest">አሁኑ ክፍለ-ጊዜ</p>
               <p className="text-sm font-black text-white">{activeSession.nameAm}</p>
             </div>
+          </div>
+        </div>
+
+        {/* Date Range Filter Bar */}
+        <div className="bg-[#062414] p-4 rounded-2xl border border-[#0f4425] mb-6 flex flex-wrap items-center justify-between gap-3 shadow-inner">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-amber-400" />
+            <span className="text-xs font-bold text-white">በቀን ማጣሪያ (Date Range Filter):</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-emerald-200/70">ከ (From):</span>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="px-2.5 py-1.5 bg-[#09351c] border border-[#0f4425] rounded-xl text-xs text-white font-mono"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-emerald-200/70">እስከ (To):</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="px-2.5 py-1.5 bg-[#09351c] border border-[#0f4425] rounded-xl text-xs text-white font-mono"
+              />
+            </div>
+            {(dateFrom || dateTo) && (
+              <button
+                type="button"
+                onClick={() => { setDateFrom(''); setDateTo(''); }}
+                className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold cursor-pointer"
+              >
+                ሁሉንም አሳይ (All Days)
+              </button>
+            )}
           </div>
         </div>
 
