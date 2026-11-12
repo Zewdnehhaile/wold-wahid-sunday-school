@@ -3,6 +3,7 @@ import path from 'path';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getFirestore,
+  initializeFirestore,
   collection,
   doc,
   getDocs,
@@ -35,11 +36,13 @@ for (const p of candidateConfigPaths) {
   }
 }
 
-// Initialize Real Firebase App & Firestore targeting the provisioned database ID
+// Initialize Real Firebase App & Firestore with long-polling for better connectivity
 let firestoreDb: any = null;
 try {
   const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-  firestoreDb = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  firestoreDb = initializeFirestore(app, {
+    experimentalForceLongPolling: true,
+  }, firebaseConfig.firestoreDatabaseId);
 } catch (err: any) {
   console.warn('⚠️ Firestore backend initialization notice:', err?.message || err);
 }

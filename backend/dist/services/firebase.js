@@ -25,11 +25,13 @@ for (const p of candidateConfigPaths) {
         catch { }
     }
 }
-// Initialize Real Firebase App & Firestore targeting the provisioned database ID
+// Initialize Real Firebase App & Firestore with long-polling for better connectivity
 let firestoreDb = null;
 try {
     const app = (0, app_1.getApps)().length === 0 ? (0, app_1.initializeApp)(firebaseConfig) : (0, app_1.getApp)();
-    firestoreDb = (0, firestore_1.getFirestore)(app, firebaseConfig.firestoreDatabaseId);
+    firestoreDb = (0, firestore_1.initializeFirestore)(app, {
+        experimentalForceLongPolling: true,
+    }, firebaseConfig.firestoreDatabaseId);
 }
 catch (err) {
     console.warn('⚠️ Firestore backend initialization notice:', err?.message || err);

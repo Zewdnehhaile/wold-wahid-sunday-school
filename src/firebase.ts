@@ -2,6 +2,7 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import {
   getFirestore,
+  initializeFirestore,
   collection,
   doc,
   getDoc,
@@ -27,8 +28,11 @@ import firebaseConfig from '../firebase-applet-config.json';
 // Initialize Firebase App with project config
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Export native Firestore instance targeting the provisioned database ID
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Export native Firestore instance with long-polling enabled for maximum connectivity reliability
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+}, firebaseConfig.firestoreDatabaseId);
+
 export const auth = getAuth(app);
 
 // Export standard Firestore operations (Real-time web streams with zero polling intervals)
