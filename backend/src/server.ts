@@ -13,6 +13,14 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Cache-busting middleware: prevent stale browser caching of HTML & API responses
+app.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
 // API Routes & Health Checks (UptimeRobot, Render, and monitoring)
 app.get(['/api/health', '/health', '/ping'], (req, res) => {
   res.status(200).json({

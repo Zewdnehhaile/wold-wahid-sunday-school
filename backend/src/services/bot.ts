@@ -195,16 +195,15 @@ export async function dispatchSendMessage(chatId: number | string, text: string,
   }
 }
 
-// Session helper syncs to local map and database
+// Session helper syncs to local map and dedicated bot_sessions collection
 export async function getSession(telegramId: number): Promise<UserSession | null> {
   if (userSessions.has(telegramId)) {
     return userSessions.get(telegramId)!;
   }
   try {
-    const docSnap = await db.collection('bot_subscribers').doc(String(telegramId)).get();
+    const docSnap = await db.collection('bot_sessions').doc(String(telegramId)).get();
     if (docSnap.exists) {
-      const data = docSnap.data();
-      const sess = data?.session || data?.data?.session;
+      const sess = docSnap.data() as UserSession;
       if (sess && sess.action && sess.step) {
         userSessions.set(telegramId, sess);
         return sess;
@@ -223,10 +222,14 @@ export async function setSession(telegramId: number, session: UserSession | null
     userSessions.delete(telegramId);
   }
   try {
-    await db.collection('bot_subscribers').doc(String(telegramId)).set({
-      session: session || null,
-      lastActiveAt: new Date().toISOString(),
-    }, { merge: true });
+    if (session) {
+      await db.collection('bot_sessions').doc(String(telegramId)).set({
+        ...session,
+        updatedAt: new Date().toISOString(),
+      });
+    } else {
+      await db.collection('bot_sessions').doc(String(telegramId)).delete().catch(() => {});
+    }
   } catch (err) {
     console.warn('Failed to sync session to db:', err);
   }
@@ -345,9 +348,25 @@ export async function findStudentOrRegistrationByPhone(phoneInput: string): Prom
   return null;
 }
 
+// In-memory deduplication caches to eliminate repeating messages
+const processedUpdateIds = new Set<number>();
+const processedMessageKeys = new Set<string>();
+
 // Process update for webhook or polling
 export async function handleTelegramUpdate(update: any) {
-  if (!update) return;
+  if (!update || typeof update !== 'object') return;
+
+  const updateId = update.update_id;
+  if (updateId) {
+    if (processedUpdateIds.has(updateId)) {
+      return; // Skip duplicate update delivery
+    }
+    processedUpdateIds.add(updateId);
+    if (processedUpdateIds.size > 5000) {
+      const first = processedUpdateIds.values().next().value;
+      if (first !== undefined) processedUpdateIds.delete(first);
+    }
+  }
 
   // Callback query handling (Inline buttons)
   if (update.callback_query) {
@@ -391,6 +410,19 @@ export async function handleTelegramUpdate(update: any) {
   }
 
   if (!chatId || !telegramId) return;
+
+  // Deduplicate repeated message IDs for the same chat
+  if (msg.message_id) {
+    const msgKey = `${chatId}_${msg.message_id}`;
+    if (processedMessageKeys.has(msgKey)) {
+      return; // Skip duplicate message
+    }
+    processedMessageKeys.add(msgKey);
+    if (processedMessageKeys.size > 5000) {
+      const first = processedMessageKeys.values().next().value;
+      if (first !== undefined) processedMessageKeys.delete(first);
+    }
+  }
 
   // Save subscriber details silently without overwriting active session
   db.collection('bot_subscribers').doc(String(telegramId)).set({
@@ -771,18 +803,11 @@ export async function handleTelegramUpdate(update: any) {
   // ─── TOP LEVEL MENU ACTIONS (No session active) ───
 
   // 1. 📝 REGISTER AS STUDENT WIZARD
-  if (['📝 የተማሪ ምዝገባ', '📝 Register as Student', 'ምዝገባ', '/register'].includes(text)) {
+  if (['📝 የተማሪ ምዝገባ', '📝 Register as Student', 'ምዝገባ', '/register', '🔄 እንደገና መመዝገብ'].includes(text)) {
     const existing = await findUserRegistrationOrStudent(telegramId, username);
     if (existing) {
       const reg = existing.data;
-      if (reg.status === 'pending' || reg.status === 'pending_approval') {
-        await dispatchSendMessage(
-          chatId,
-          `⚠️ ማመልከቻዎ አስቀድሞ ተመዝግቧል (Submitted: ${reg.submittedAt?.split('T')[0] || 'በቅርቡ'}).\n\nሁኔታውን ለማወቅ "🔍 የምዝገባ ሁኔታ" የሚለውን ይጫኑ።`,
-          mainMenuKeyboard
-        );
-        return;
-      } else if (reg.status === 'approved' || reg.status === 'active') {
+      if (reg.status === 'approved' || reg.status === 'active') {
         await dispatchSendMessage(
           chatId,
           `🎉 ምዝገባዎ የጸደቀ ተማሪ ኖት!\nየተማሪ መታወቂያዎ: \`${reg.studentCode || reg.code}\`\n\nየግል መታወቂያዎንና QR ኮድዎን ለመቀበል "👤 የኔ መታወቂያና QR" የሚለውን ይጫኑ።`,
@@ -798,9 +823,12 @@ export async function handleTelegramUpdate(update: any) {
       data: {}
     });
 
+    const hasPriorSubmission = existing && (existing.data?.status === 'pending' || existing.data?.status === 'pending_approval');
+    const updateHeader = hasPriorSubmission ? '💡 *(ማሳሰቢያ፡ የቀደመውን ማመልከቻዎን በአዲሱ 9 ደረጃ መረጃ ያድሳል)*\n\n' : '';
+
     await dispatchSendMessage(
       chatId,
-      '📝 *የተማሪ ምዝገባ (Step 1/10)*\n*Student Registration*\n\nእባክዎ ሙሉ ስምዎን በአማርኛ ወይም በእንግሊዝኛ ያስገቡ:\nPlease enter your Full Name:\n\n(ምሳሌ፡ ዮሐንስ ተስፋዬ / Yohannes Tesfaye)',
+      `📝 *የተማሪ ምዝገባ (Step 1/9)*\n*Student Registration*\n\n${updateHeader}እባክዎ ሙሉ ስምዎን በአማርኛ ወይም በእንግሊዝኛ ያስገቡ:\nPlease enter your Full Name:\n\n(ምሳሌ፡ ዮሐንስ ተስፋዬ / Yohannes Tesfaye)`,
       cancelKeyboard
     );
     return;
@@ -1217,6 +1245,19 @@ export async function startPolling() {
   isPollingActive = true;
   console.log('🤖 Telegram bot native long-polling engine started successfully.');
 
+  // Clean initialization: Drop webhook and acknowledge backlog to prevent replaying old messages on restart
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/deleteWebhook?drop_pending_updates=true`);
+    const initRes = await fetch(`https://api.telegram.org/bot${token}/getUpdates?offset=-1&limit=1`);
+    const initData: any = await initRes.json();
+    if (initData.ok && Array.isArray(initData.result) && initData.result.length > 0) {
+      currentOffset = initData.result[initData.result.length - 1].update_id + 1;
+      console.log(`🤖 Telegram polling offset synced to ${currentOffset}`);
+    }
+  } catch (initErr) {
+    console.warn('Telegram polling offset init notice:', initErr);
+  }
+
   (async () => {
     while (isPollingActive) {
       try {
@@ -1244,10 +1285,12 @@ export async function startPolling() {
         const data: any = await res.json();
         if (data.ok && Array.isArray(data.result)) {
           for (const update of data.result) {
-            currentOffset = update.update_id + 1;
-            handleTelegramUpdate(update).catch((err) => {
+            currentOffset = Math.max(currentOffset, update.update_id + 1);
+            try {
+              await handleTelegramUpdate(update);
+            } catch (err) {
               console.error('Error processing update in bot:', err);
-            });
+            }
           }
         }
       } catch (err: any) {

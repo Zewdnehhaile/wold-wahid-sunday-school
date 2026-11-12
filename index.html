@@ -78,9 +78,19 @@
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
+      // Clear legacy browser caches to ensure users immediately receive updated UI
+      if ('caches' in window) {
+        caches.keys().then((keys) => {
+          keys.forEach((key) => caches.delete(key));
+        });
+      }
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW register fail:', err));
+          navigator.serviceWorker.getRegistrations().then((registrations) => {
+            for (let reg of registrations) {
+              reg.unregister();
+            }
+          });
         });
       }
     </script>

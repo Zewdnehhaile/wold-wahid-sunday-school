@@ -15,6 +15,14 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
 
+  // Cache-busting middleware: prevent stale browser caching of HTML & API responses
+  app.use((req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    next();
+  });
+
   // API Routes & Health Checks
   app.get(['/api/health', '/health', '/ping'], (req, res) => {
     res.json({
@@ -1192,8 +1200,8 @@ async function startServer() {
 
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-  // Keep-alive mechanism to prevent Render free instance from idling
-  const externalUrl = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || 'https://wold-wahid-sunday-school.onrender.com';
+  // Keep-alive mechanism to prevent instance from idling
+  const externalUrl = process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://wold-wahid-sunday-school-app.vercel.app';
   setInterval(async () => {
     try {
       const pingUrl = externalUrl ? `${externalUrl.replace(/\/$/, '')}/api/health` : `http://localhost:${PORT}/api/health`;

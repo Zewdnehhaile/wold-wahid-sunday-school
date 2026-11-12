@@ -1,51 +1,31 @@
-// Service Worker for Wold Wahid Sunday School PWA
-const CACHE_NAME = 'wold-wahid-cache-v1';
-const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json'
-];
+// Service Worker for Wold Wahid Sunday School PWA - Cache-busting & push notification worker
 
 self.addEventListener('install', (event) => {
+  // Clear any existing caches immediately
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    })
+    caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
   );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
+  // Purge all legacy caches and take control immediately
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            return caches.delete(key);
-          }
-        })
-      );
-    })
+    caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
   );
   self.clients.claim();
 });
 
-// Network first, falling back to cache
+// Network only: Always fetch live content, never serve stale cached index.html or assets
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   event.respondWith(
-    fetch(event.request)
-      .then((networkResponse) => {
-        return networkResponse;
-      })
-      .catch(() => {
-        return caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) return cachedResponse;
-          if (event.request.headers.get('accept')?.includes('text/html')) {
-            return caches.match('/index.html');
-          }
-        });
-      })
+    fetch(event.request).catch(() => {
+      // Offline fallback only when network completely unreachable
+      return new Response('Offline - please check your internet connection.', {
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
+    })
   );
 });
 
@@ -61,8 +41,8 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'ወልደ ዋሕድ ሰንበት ት/ቤት';
   const options = {
     body: data.body || 'አዲስ ማስታወቂያ አለ። ለመመልከት ይጫኑ።',
-    icon: '/assets/aistudio/photo_2026-10-22_10-46-07__2__5dd80c37.jpg',
-    badge: '/assets/aistudio/photo_2026-10-22_10-46-07__2__5dd80c37.jpg',
+    icon: '/assets/aistudio/image_2e12d320.png',
+    badge: '/assets/aistudio/image_2e12d320.png',
     data: data.url || '/',
     vibrate: [200, 100, 200],
   };
