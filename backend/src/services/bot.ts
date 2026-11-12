@@ -546,7 +546,7 @@ async function handleTelegramUpdateInner(update: any) {
         await setSession(telegramId, session);
         await dispatchSendMessage(
           chatId,
-          '✝️ *የክርስትና ስም ያስገቡ (Step 2/9):*\nPlease enter your Christian Name:\n(ምሳሌ፡ ወልደ ማርያም)',
+          '✝️ *የክርስትና ስም ያስገቡ (Step 2/10):*\nPlease enter your Christian Name:\n(ምሳሌ፡ ወልደ ማርያም)',
           cancelKeyboard
         );
       } else if (session.step === 'christianName') {
@@ -564,17 +564,30 @@ async function handleTelegramUpdateInner(update: any) {
         };
         await dispatchSendMessage(
           chatId,
-          '👤 *ጾታ ይምረጡ (Step 3/9):*\nPlease select your Gender:',
+          '👤 *ጾታ ይምረጡ (Step 3/10):*\nPlease select your Gender:',
           genderKeyboard
         );
       } else if (session.step === 'gender') {
         session.data.gender = text.includes('ወንድ') || text.toLowerCase().includes('male') ? 'male' : 'female';
         session.step = 'birthDate';
         await setSession(telegramId, session);
+
+        // Generate years keyboard (Ethiopian years)
+        const currentEthYear = 2017;
+        const years = [];
+        for (let y = currentEthYear - 5; y >= currentEthYear - 60; y -= 4) {
+          const row = [];
+          for (let i = 0; i < 4; i++) {
+            if (y - i >= currentEthYear - 60) row.push({ text: String(y - i) });
+          }
+          years.push(row);
+        }
+        years.push([{ text: '❌ Cancel (ይቅር)' }]);
+
         await dispatchSendMessage(
           chatId,
-          '📅 *የትውልድ ዘመን ወይም ዕድሜ ያስገቡ (Step 4/9):*\nPlease enter your Birth Date / Age:\n(ምሳሌ፡ 1998 ዓ.ም)',
-          cancelKeyboard
+          '📅 *የትውልድ ዘመን ወይም ዕድሜ ይምረጡ ወይም ያስገቡ (Step 4/10):*\nPlease select or enter your Birth Year / Age:\n(ምሳሌ፡ 1998 ዓ.ም)',
+          { reply_markup: { keyboard: years, resize_keyboard: true } }
         );
       } else if (session.step === 'birthDate') {
         session.data.birthDate = text;
@@ -582,7 +595,7 @@ async function handleTelegramUpdateInner(update: any) {
         await setSession(telegramId, session);
         await dispatchSendMessage(
           chatId,
-          '📱 *ስልክ ቁጥርዎን ያስገቡ (Step 5/9):*\nPlease enter your Phone Number:\n(ምሳሌ፡ 0911234567)',
+          '📱 *ስልክ ቁጥርዎን ያስገቡ (Step 5/10):*\nPlease enter your Phone Number:\n(ምሳሌ፡ 0911234567)',
           cancelKeyboard
         );
       } else if (session.step === 'phone') {
@@ -591,20 +604,29 @@ async function handleTelegramUpdateInner(update: any) {
         await setSession(telegramId, session);
         await dispatchSendMessage(
           chatId,
-          '📍 *የመኖሪያ አድራሻ (ወረዳ / ሰፈር) ያስገቡ (Step 6/9):*\nPlease enter your Address (Woreda / Subcity):\n(ምሳሌ፡ ቦሌ ወረዳ 03)',
+          '📍 *የመኖሪያ አድራሻ (ወረዳ / ሰፈር) ያስገቡ (Step 6/10):*\nPlease enter your Address (Woreda / Subcity):\n(ምሳሌ፡ ቦሌ ወረዳ 03)',
           cancelKeyboard
         );
       } else if (session.step === 'address') {
         session.data.address = text;
-        session.step = 'emergencyContact';
+        session.step = 'emergencyName';
         await setSession(telegramId, session);
         await dispatchSendMessage(
           chatId,
-          '🛡️ *የቅርብ ተጠሪ ስም እና ስልክ ቁጥር ያስገቡ (Step 7/9):*\nPlease enter Emergency Contact Name & Phone:\n(ምሳሌ፡ አበበ ከበደ - 0911234567)',
+          '🛡️ *የቅርብ ተጠሪ ስም ያስገቡ (Step 7/10):*\nPlease enter Emergency Contact Name:',
           cancelKeyboard
         );
-      } else if (session.step === 'emergencyContact') {
-        session.data.emergencyContactStr = text;
+      } else if (session.step === 'emergencyName') {
+        session.data.emergencyName = text;
+        session.step = 'emergencyPhone';
+        await setSession(telegramId, session);
+        await dispatchSendMessage(
+          chatId,
+          '📞 *የቅርብ ተጠሪ ስልክ ቁጥር ያስገቡ (Step 8/10):*\nPlease enter Emergency Contact Phone:',
+          cancelKeyboard
+        );
+      } else if (session.step === 'emergencyPhone') {
+        session.data.emergencyPhone = text;
         session.step = 'department';
         await setSession(telegramId, session);
         const deptKeyboard = {
@@ -620,7 +642,7 @@ async function handleTelegramUpdateInner(update: any) {
         };
         await dispatchSendMessage(
           chatId,
-          '⛪ *የሰንበት ት/ቤት ክፍል ይምረጡ (Step 8/9):*\nSelect your Sunday School Department:',
+          '⛪ *የሰንበት ት/ቤት ክፍል ይምረጡ (Step 9/10):*\nSelect your Sunday School Department:',
           deptKeyboard
         );
       } else if (session.step === 'department') {
@@ -629,7 +651,7 @@ async function handleTelegramUpdateInner(update: any) {
         await setSession(telegramId, session);
         await dispatchSendMessage(
           chatId,
-          '📸 *የመገለጫ ፎቶ ይላኩ - ከ 5MB ያልበለጠ (Step 9/9):*\nPlease send your profile photo (Max 5MB):\n(ወይንም "None" ብለው መጻፍ ይችላሉ)',
+          '📸 *የመገለጫ ፎቶ ይላኩ - ከ 5MB ያልበለጠ (Step 10/10):*\nPlease send your profile photo (Max 5MB):\n(ወይንም "None" ብለው መጻፍ ይችላሉ)',
           cancelKeyboard
         );
       } else if (session.step === 'photo') {
@@ -672,10 +694,11 @@ async function handleTelegramUpdateInner(update: any) {
             phone: session.data.phone,
             address: session.data.address,
             subcity: session.data.address,
-            emergencyContactStr: session.data.emergencyContactStr,
+            emergencyName: session.data.emergencyName,
+            emergencyPhone: session.data.emergencyPhone,
             emergencyContact: {
-              name: session.data.emergencyContactStr || '',
-              phone: '',
+              name: session.data.emergencyName || '',
+              phone: session.data.emergencyPhone || '',
               relation: 'ቤተሰብ / Family'
             },
             department: session.data.department,
@@ -689,18 +712,19 @@ async function handleTelegramUpdateInner(update: any) {
           await setSession(telegramId, null);
 
           const successMsg = 
-            `🎉 *የተማሪ ምዝገባ (9ቱ ደረጃዎች) በተሳካ ሁኔታ ተልኳል!*\n` +
+            `🎉 *የተማሪ ምዝገባ (10ቱ ደረጃዎች) በተሳካ ሁኔታ ተልኳል!*\n` +
             `*Registration Submitted Successfully!*\n\n` +
-            `📋 *የመረጃ ማጠቃለያ (9 Steps Summary):*\n` +
+            `📋 *የመረጃ ማጠቃለያ (10 Steps Summary):*\n` +
             `1. ሙሉ ስም: ${session.data.name}\n` +
             `2. የክርስትና ስም: ${session.data.christianName}\n` +
             `3. ጾታ: ${session.data.gender}\n` +
             `4. የትውልድ ዘመን: ${session.data.birthDate}\n` +
             `5. ስልክ: ${session.data.phone}\n` +
             `6. አድራሻ: ${session.data.address}\n` +
-            `7. ተጠሪ: ${session.data.emergencyContactStr}\n` +
-            `8. ክፍል: ${session.data.department}\n` +
-            `9. ፎቶ: ተካቷል (<= 5MB)\n\n` +
+            `7. ተጠሪ ስም: ${session.data.emergencyName}\n` +
+            `8. ተጠሪ ስልክ: ${session.data.emergencyPhone}\n` +
+            `9. ክፍል: ${session.data.department}\n` +
+            `10. ፎቶ: ተካቷል (<= 5MB)\n\n` +
             `⏳ *ሁኔታ:* በመጠባበቅ ላይ (Pending Review - Not in active DB until approved)\n\n` +
             `አስተዳዳሪው ሲያፀድቅ የተማሪ መታወቂያዎና QR ኮድዎ ይደርስዎታል።`;
 
@@ -886,11 +910,11 @@ async function handleTelegramUpdateInner(update: any) {
     });
 
     const hasPriorSubmission = existing && (existing.data?.status === 'pending' || existing.data?.status === 'pending_approval');
-    const updateHeader = hasPriorSubmission ? '💡 *(ማሳሰቢያ፡ የቀደመውን ማመልከቻዎን በአዲሱ 9 ደረጃ መረጃ ያድሳል)*\n\n' : '';
+    const updateHeader = hasPriorSubmission ? '💡 *(ማሳሰቢያ፡ የቀደመውን ማመልከቻዎን በአዲሱ 10 ደረጃ መረጃ ያድሳል)*\n\n' : '';
 
     await dispatchSendMessage(
       chatId,
-      `📝 *የተማሪ ምዝገባ (Step 1/9)*\n*Student Registration*\n\n${updateHeader}እባክዎ ሙሉ ስምዎን በአማርኛ ወይም በእንግሊዝኛ ያስገቡ:\nPlease enter your Full Name:\n\n(ምሳሌ፡ ዮሐንስ ተስፋዬ / Yohannes Tesfaye)`,
+      `📝 *የተማሪ ምዝገባ (Step 1/10)*\n*Student Registration*\n\n${updateHeader}እባክዎ ሙሉ ስምዎን በአማርኛ ወይም በእንግሊዝኛ ያስገቡ:\nPlease enter your Full Name:\n\n(ምሳሌ፡ ዮሐንስ ተስፋዬ / Yohannes Tesfaye)`,
       cancelKeyboard
     );
     return;
@@ -903,14 +927,14 @@ async function handleTelegramUpdateInner(update: any) {
       if (activeSession && activeSession.action === 'register') {
         const stepMap: Record<string, string> = {
           name: '1', christianName: '2', gender: '3', birthDate: '4',
-          phone: '5', address: '6', emergencyContact: '7',
-          department: '8', photo: '9'
+          phone: '5', address: '6', emergencyName: '7', emergencyPhone: '8',
+          department: '9', photo: '10'
         };
         const stepNum = stepMap[activeSession.step] || '1';
 
         await dispatchSendMessage(
           chatId,
-          `⏳ *የምዝገባ ሂደትዎ ገና በመጠናቀቅ ላይ ነው (Draft Registration - Step ${stepNum}/9)*\n` +
+          `⏳ *የምዝገባ ሂደትዎ ገና በመጠናቀቅ ላይ ነው (Draft Registration - Step ${stepNum}/10)*\n` +
           `⛪ መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን\n═══════════════════════\n` +
           `• ሙሉ ስም: ${activeSession.data.name || 'አልገባም'}\n` +
           `• ስልክ: ${activeSession.data.phone || 'አልገባም'}\n` +
@@ -1381,7 +1405,11 @@ export function getBot() {
   return botInstance;
 }
 
-// Start polling on startup
+// Start polling on startup only in production to prevent multiple instances from processing the same updates
 if (token && !token.startsWith('PASTE_')) {
-  startPolling().catch((err) => console.error('Failed to start Telegram polling:', err));
+  if (process.env.NODE_ENV === 'production' || process.env.ENABLE_BOT_POLLING === 'true') {
+    startPolling().catch((err) => console.error('Failed to start Telegram polling:', err));
+  } else {
+    console.log('ℹ️ Telegram bot polling is disabled in development mode (NODE_ENV != production). Set ENABLE_BOT_POLLING=true to override.');
+  }
 }
