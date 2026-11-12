@@ -166,14 +166,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onOpenStudentPort
 
   return (
     <div className="min-h-screen bg-[#062414] text-slate-100 flex items-center justify-center p-4 relative overflow-hidden font-sans select-none">
-      {/* Church Background Image - Visible */}
+      {/* Church Background Image from User Upload */}
       <div className="absolute inset-0 z-0">
         <img 
-          src="/assets/aistudio/1792237453828_f6473ebe.jfif" 
+          src="/assets/aistudio/images_f4623d46.jfif" 
           alt="Church Building" 
-          className="w-full h-full object-cover brightness-75"
+          className="w-full h-full object-cover filter brightness-90 saturate-110"
         />
-        <div className="absolute inset-0 bg-black/40"></div>
+        <div className="absolute inset-0 bg-gradient-to-tr from-[#062414]/90 via-[#09351c]/70 to-black/50 backdrop-blur-[2px]"></div>
       </div>
 
       {/* Login Card */}
