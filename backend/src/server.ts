@@ -1204,8 +1204,8 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 10000;
 
-// Keep-alive mechanism to prevent Render free instance from idling
-const externalUrl = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || 'https://wold-wahid-sunday-school.onrender.com';
+// Keep-alive mechanism to prevent instance from idling
+const externalUrl = process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://wold-wahid-sunday-school-app.vercel.app';
 setInterval(async () => {
   try {
     const pingUrl = externalUrl ? `${externalUrl.replace(/\/$/, '')}/api/health` : `http://localhost:${PORT}/api/health`;

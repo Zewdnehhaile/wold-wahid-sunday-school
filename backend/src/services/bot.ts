@@ -1106,7 +1106,7 @@ export async function handleTelegramUpdate(update: any) {
   // 6. 📱 DOWNLOAD WOLD WAHID APK & WEB APP
   if (['📱 የሞባይል መተግበሪያ', '📱 Download Wold Wahid APK', 'መተግበሪያ', '/apk', '/app'].includes(text)) {
     const telegramWebAppUrl = 'https://t.me/attendanceforchurchbot/woldwahidsundayschool';
-    const webUrl = 'https://wold-wahid-sunday-school.onrender.com';
+    const webUrl = 'https://wold-wahid-sunday-school-app.vercel.app';
     const apkUrl = `${webUrl}/WoldWahid.apk`;
     const appMsgText = 
       `📱 *የወልድ ዋሕድ ሰንበት ት/ቤት መተግበሪያ (Wold Wahid App)*\n` +

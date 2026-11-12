@@ -1,11 +1,9 @@
 /**
  * Unified API Client for Wold-Wahid Sunday School
- * Seamlessly dispatches requests to:
- * - Production Render backend (https://wold-wahid-sunday-school.onrender.com) when hosted on Vercel or external static domains
- * - Local / relative /api endpoints when running full-stack
+ * Seamlessly dispatches requests to production Vercel app / backend
  */
 
-export const RENDER_BACKEND_URL = 'https://wold-wahid-sunday-school.onrender.com';
+export const VERCEL_BACKEND_URL = 'https://wold-wahid-sunday-school-app.vercel.app';
 
 export function getApiEndpointUrl(endpoint: string): string {
   const clean = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
@@ -25,7 +23,7 @@ export function getApiEndpointUrl(endpoint: string): string {
       hostname.includes('github.io') ||
       hostname.includes('run.app')
     ) {
-      return `${RENDER_BACKEND_URL}${clean}`;
+      return `${VERCEL_BACKEND_URL}${clean}`;
     }
   }
 
@@ -38,17 +36,17 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}): Pro
 
   try {
     const res = await fetch(targetUrl, options);
-    // If relative endpoint returned 404 (e.g. static preview without backend proxy), fallback to Render
+    // If relative endpoint returned 404 (e.g. static preview without backend proxy), fallback to Vercel
     if (!res.ok && res.status === 404 && !targetUrl.startsWith('http')) {
-      console.warn(`[apiFetch] Endpoint 404 at ${targetUrl}, falling back to Render backend...`);
-      return await fetch(`${RENDER_BACKEND_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`, options);
+      console.warn(`[apiFetch] Endpoint 404 at ${targetUrl}, falling back to Vercel backend...`);
+      return await fetch(`${VERCEL_BACKEND_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`, options);
     }
     return res;
   } catch (err) {
-    // Network error on relative path: fallback to Render backend
+    // Network error on relative path: fallback to Vercel backend
     if (!targetUrl.startsWith('http')) {
-      console.warn(`[apiFetch] Network error at ${targetUrl}, falling back to Render backend...`, err);
-      return await fetch(`${RENDER_BACKEND_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`, options);
+      console.warn(`[apiFetch] Network error at ${targetUrl}, falling back to Vercel backend...`, err);
+      return await fetch(`${VERCEL_BACKEND_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`, options);
     }
     throw err;
   }
