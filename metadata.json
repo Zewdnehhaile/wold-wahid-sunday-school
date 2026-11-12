@@ -1,0 +1,6 @@
+{
+  "name": "ወልደ ዋሕድ ሰንበት ት/ቤት - መካነ ቅዱሳን ኢያቄም ወሐና",
+  "description": "የወልደ ዋሕድ ሰንበት ትምህርት ቤት የተማሪዎች መታወቂያ፣ የሳምንታዊ መርሐ ግብርና የመገኘት ክትትል ሥርዓት",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

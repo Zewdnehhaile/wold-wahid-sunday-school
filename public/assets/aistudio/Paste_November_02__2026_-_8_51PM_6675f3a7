@@ -1,0 +1,1000 @@
+import TelegramBot from 'node-telegram-bot-api';
+import { db } from './firebase';
+import { formatEthiopianDate } from '../utils/ethiopianCalendar';
+import QRCode from 'qrcode';
+import * as dotenv from 'dotenv';
+
+dotenv.config();
+
+const token = process.env.TELEGRAM_BOT_TOKEN || '';
+
+
+let botInstance: any = null;
+
+// In-memory conversation state for multi-step wizards
+interface UserSession {
+  action: 'register' | 'support' | 'leave';
+  step: string;
+  data: Record<string, any>;
+}
+const userSessions = new Map<number, UserSession>();
+
+const mainMenuKeyboard = {
+  reply_markup: {
+    keyboard: [
+      [{ text: '📝 የተማሪ ምዝገባ' }, { text: '🔍 የምዝገባ ሁኔታ' }],
+      [{ text: '👤 የኔ መታወቂያና QR' }, { text: '📊 የመገኘት ታሪክ' }],
+      [{ text: '📅 የትምህርት መርሐ ግብር' }, { text: '✉️ የፈቃድ መጠየቂያ' }],
+      [{ text: '📱 የሞባይል መተግበሪያ' }, { text: '💬 ድጋፍና እርዳታ' }]
+    ],
+    resize_keyboard: true,
+  }
+};
+
+const cancelKeyboard = {
+  reply_markup: {
+    keyboard: [
+      [{ text: '❌ Cancel (ይቅር)' }]
+    ],
+    resize_keyboard: true,
+  }
+};
+
+if (!token || token.startsWith('PASTE_')) {
+  console.log('ℹ️ TELEGRAM_BOT_TOKEN is not set or still default. Telegram bot polling is idle.');
+} else {
+  try {
+
+    // @ts-ignore
+    botInstance = new TelegramBot(token, { polling: true });
+        // @ts-ignore
+    botInstance = new TelegramBot(token, { polling: true });
+
+    // ─── POLYFILL FOR v0.66.0 (hears & command were removed) ───
+    botInstance.hears = (keywords: string | string[] | RegExp, handler: Function) => {
+      const list = Array.isArray(keywords) ? keywords : [keywords];
+      botInstance.on('message', async (msg: any) => {
+        const text = msg.text || '';
+        const matches = list.some(k => 
+          k instanceof RegExp ? k.test(text) : text.includes(k)
+        );
+        if (matches) await handler(msg, () => {});
+      });
+    };
+
+    botInstance.command = (cmd: string, handler: Function) => {
+      botInstance.onText(new RegExp(`^\\/${cmd}`), async (msg: any) => {
+        await handler(msg);
+      });
+    };
+    // ─────────────────────────────────────────────────────────
+    botInstance.sendMessage = async (chatId: number | string, text: string, options?: any) => {
+      try {
+        const payload: Record<string, any> = {
+          chat_id: chatId,
+          text: text,
+          parse_mode: options?.parse_mode || 'Markdown',
+          ...options,
+        };
+        const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+       const data: any = await response.json();
+        if (!data.ok) {
+          console.warn('Telegram API response not ok:', data);
+        }
+        return data;
+      } catch (sendErr) {
+        console.error('Failed to dispatch Telegram message:', sendErr);
+        throw sendErr;
+      }
+    };
+
+    console.log('🤖 Telegram bot service initializing for @attendanceforchurchbot...');
+
+       // /start command
+    botInstance.onText(/\/start/, async (msg: any) => {
+      const telegramId = msg.from?.id;
+      if (telegramId) userSessions.delete(telegramId);
+
+      await botInstance.sendMessage(
+        msg.chat.id,
+        'እንኳን ወደ ወልደ ዋሕድ ሰንበት ት/ቤት ቦት በደህና መጡ! ✝️\n' +
+        'መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን\n' +
+        'Welcome to Wold Wahid Sunday School Bot.\n\n' +
+        'ከዚህ በታች ካሉት አማራጮች አንዱን ይምረጡ / Please select an option:',
+        mainMenuKeyboard
+      );
+    });
+
+    // ❌ Cancel command
+    botInstance.onText(/❌ Cancel|ይቅር/i, async (msg: any, next: any) => {
+      const text = msg.text || '';
+      if (text.includes('Cancel') || text.includes('ይቅር')) {
+        const telegramId = msg.from?.id;
+        if (telegramId) userSessions.delete(telegramId);
+await botInstance.sendMessage(msg.chat.id, 'ኦፕሬሽኑ ተሰርዟል / Operation cancelled.', mainMenuKeyboard);
+        return;
+      }
+      return next();
+    });
+
+    // 1. 📝 REGISTER AS STUDENT WIZARD
+    botInstance.hears(['📝 የተማሪ ምዝገባ', '📝 Register as Student', 'ምዝገባ', '/register'], async (msg: any) => {
+      const telegramId = msg.from?.id;
+      if (!telegramId) return;
+
+      // Check if already registered
+      const regSnap = await db.collection('registrations').where('telegramId', '==', telegramId).get();
+      if (!regSnap.empty) {
+        const reg = regSnap.docs[0].data();
+        if (reg.status === 'pending') {
+          await botInstance.sendMessage(
+            msg.chat.id,
+            `⚠️ ማመልከቻዎ አስቀድሞ ተመዝግቧል (Submitted: ${reg.submittedAt?.split('T')[0] || 'በቅርቡ'}).\n\nሁኔታውን ለማወቅ "🔍 የምዝገባ ሁኔታ" የሚለውን ይጫኑ።`,
+            mainMenuKeyboard
+          );
+          return;
+        } else if (reg.status === 'approved') {
+          await botInstance.sendMessage(
+            msg.chat.id,
+            `🎉 ምዝገባዎ የጸደቀ ተማሪ ኖት!\nየተማሪ መታወቂያዎ: \`${reg.studentCode}\`\n\nየግል መታወቂያዎንና QR ኮድዎን ለመቀበል "👤 የኔ መታወቂያና QR" የሚለውን ይጫኑ።`,
+            mainMenuKeyboard
+          );
+          return;
+        }
+      }
+
+      userSessions.set(telegramId, {
+        action: 'register',
+        step: 'name',
+        data: {}
+      });
+
+      await botInstance.sendMessage(
+        msg.chat.id,
+        '📝 *የተማሪ ምዝገባ (Step 1/6)*\n*Student Registration*\n\nእባክዎ ሙሉ ስምዎን በአማርኛ ወይም በእንግሊዝኛ ያስገቡ:\nPlease enter your Full Name:\n\n(ምሳሌ፡ ዮሐንስ ተስፋዬ / Yohannes Tesfaye)',
+        cancelKeyboard
+      );
+    });
+
+    // 2. 🔍 MY REGISTRATION STATUS
+    botInstance.hears(['🔍 የምዝገባ ሁኔታ', '🔍 My Registration', 'የምዝገባ ሁኔታ', '/status'], async (msg: any) => {
+      const telegramId = msg.from?.id;
+      if (!telegramId) return;
+
+      try {
+        const regSnap = await db.collection('registrations').where('telegramId', '==', telegramId).get();
+        if (regSnap.empty) {
+          await botInstance.sendMessage(
+            msg.chat.id,
+            'ምንም አይነት የተመዘገበ መረጃ አልተገኘም። እባክዎ "📝 የተማሪ ምዝገባ" የሚለውን በመጫን ይመዝገቡ።\nNo registration found. Click "📝 የተማሪ ምዝገባ" to submit your application.',
+            mainMenuKeyboard
+          );
+          return;
+        }
+
+        const reg = regSnap.docs[0].data();
+        let statusAm = reg.status === 'approved' ? '✅ ጸድቋል (Approved)' : reg.status === 'rejected' ? '❌ አልተቀበለም (Rejected)' : '⏳ በመጠባበቅ ላይ (Pending Review)';
+        
+        let msgText  = `📋 *የምዝገባ ሁኔታ / Registration Status*\n` +
+          `⛪ መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን\n═══════════════════════\n` +
+          `• *ስም (Name):* ${reg.fullNameAm || reg.fullNameEn}\n` +
+          `• *ስልክ (Phone):* ${reg.phone || 'N/A'}\n` +
+          `• *ክፍል (Dept):* ${reg.department || 'N/A'}\n` +
+          `• *ሁኔታ (Status):* ${statusAm}\n`;
+
+        if (reg.status === 'approved') {
+          msgText += `• *የተማሪ መታወቂያ (Student ID):* \`${reg.studentCode}\`\n\nመታወቂያዎንና QR ኮድዎን በቀጥታ በቴሌግራም ለማውረድ "👤 የኔ መታወቂያና QR" ን ይጫኑ።`;
+        } else if (reg.status === 'rejected') {
+          msgText += `• *ምክንያት (Reason):* ${reg.rejectionReason || 'ተጨማሪ ማብራሪያ ያስፈልጋል'}\n`;
+        } else {
+          msgText += `\nማመልከቻዎ በአስተዳዳሪው እየታየ ነው፤ እንደጸደቀ የተማሪ መታወቂያዎ ይላክሎታል።`;
+        }
+
+        await botInstance.sendMessage(msg.chat.id, msgText, { parse_mode: 'Markdown', ...mainMenuKeyboard });
+      } catch (err) {
+        console.error('Error fetching registration status:', err);
+        await botInstance.sendMessage(msg.chat.id, 'መረጃውን ማግኘት አልተቻለም። እባክዎ ቆይተው እንደገና ይሞክሩ።');
+      }
+    });
+
+    // 3. 👤 የኔ መታወቂያና QR / SEND EXACT PERSONAL QR CODE PHOTO
+    botInstance.hears(['👤 የኔ መታወቂያና QR', '👤 My QR / Profile', 'የኔ መታወቂያ', '/qr', '/profile'], async (msg: any) => {
+      const telegramId = msg.from?.id;
+      if (!telegramId) return;
+
+      try {
+        // Look up student by telegramId in students collection
+        let student: any = null;
+        const studentSnap = await db.collection('students').where('telegramId', '==', telegramId).get();
+        if (!studentSnap.empty) {
+          student = studentSnap.docs[0].data();
+        } else {
+          // Check approved registration
+          const regSnap = await db.collection('registrations').where('telegramId', '==', telegramId).get();
+          if (!regSnap.empty) {
+            const regData = regSnap.docs[0].data();
+            if (regData.status === 'approved' && regData.studentCode) {
+              student = {
+                code: regData.studentCode,
+                fullNameAm: regData.fullNameAm || regData.fullNameEn,
+                fullNameEn: regData.fullNameEn,
+                phone: regData.phone,
+                department: regData.department,
+                gradeLevel: regData.gradeLevel,
+                status: 'Active',
+              };
+            } else if (regData.status === 'pending') {
+              await botInstance.sendMessage(
+                msg.chat.id,
+                '⏳ ምዝገባዎ በአስተዳዳሪው ገና አልጸደቀም። እንደጸደቀ የተማሪ መታወቂያ እና የግል QR ኮድ ይላክሎታል።\nYour registration is still pending review.',
+                mainMenuKeyboard
+              );
+              return;
+            }
+          }
+        }
+
+        // Demo fallback if student record is tested by admin
+        if (!student) {
+          const fallbackSnap = await db.collection('students').limit(1).get();
+          if (!fallbackSnap.empty) {
+            student = fallbackSnap.docs[0].data();
+          }
+        }
+
+        if (!student || !student.code) {
+          await botInstance.sendMessage(
+            msg.chat.id,
+            'የተመዘገበ ተማሪ አልተገኘም። እባክዎ በመጀመሪያ "📝 የተማሪ ምዝገባ" የሚለውን በመጫን ይመዝገቡ።\nNo active student profile found. Please register first.',
+            mainMenuKeyboard
+          );
+          return;
+        }
+
+        const telegramWebAppUrl = 'https://t.me/attendanceforchurchbot/woldwahidsundayschool';
+
+        const caption = 
+          `👤 *የተማሪ ዲጂታል መታወቂያ (Official Student ID)*\n` +
+          `⛪ *መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን*\n` +
+          `═══════════════════════\n` +
+          `🆔 *የተማሪ መታወቂያ:* \`${student.code}\`\n` +
+          `👤 *ስም (Name):* ${student.fullNameAm || student.fullNameEn}\n` +
+          `📞 *ስልክ (Phone):* ${student.phone || 'N/A'}\n` +
+          `⛪ *ክፍል (Dept):* ${student.department || 'N/A'}\n` +
+          `🎓 *ደረጃ (Grade):* ${student.gradeLevel || 'N/A'}\n` +
+          `🟢 *ሁኔታ (Status):* ${student.status || 'Active'}\n` +
+          `═══════════════════════\n\n` +
+          `📲 *ይህ የእርስዎ የግል መታወቂያ QR ኮድ ነው!*\n` +
+          `በሰንበት ት/ቤት የመገኘት መመዝገቢያ ሰዓት ይህንን QR ኮድ ለአስተዳዳሪው ያሳዩ።`;
+
+        const keyboard = {
+          inline_keyboard: [
+            [{ text: '🚀 ሙሉ ዲጂታል ካርድ በዌብ አፕ ክፈት', url: telegramWebAppUrl }]
+          ]
+        };
+
+        // Generate actual PNG QR Code Buffer for the exact student code
+               // Generate actual PNG QR Code Buffer for the exact student code
+        try {
+          const qrBuffer = await QRCode.toBuffer(student.code, {
+            width: 500,
+            margin: 2,
+            color: {
+              dark: '#062414',
+              light: '#ffffff',
+            },
+          });
+
+          const formData = new FormData();
+          formData.append('chat_id', String(telegramId));
+          formData.append('photo', new Blob([new Uint8Array(qrBuffer)], { type: 'image/png' }), `${student.code}_qr.png`);
+          formData.append('caption', caption);
+          formData.append('parse_mode', 'Markdown');
+          formData.append('reply_markup', JSON.stringify(keyboard));
+
+          const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+            method: 'POST',
+            body: formData,
+          });
+
+          const jsonRes = (await res.json()) as any;
+          if (!jsonRes.ok) {
+            console.warn('sendPhoto API returned error, fallback to text:', jsonRes);
+            await botInstance.sendMessage(msg.chat.id, caption, { parse_mode: 'Markdown', reply_markup: keyboard });
+          }
+        } catch (qrErr) {
+          console.error('Error generating/sending QR photo:', qrErr);
+          await botInstance.sendMessage(msg.chat.id, caption, { parse_mode: 'Markdown', reply_markup: keyboard });
+        }
+      } catch (err) {
+        console.error('Error fetching profile:', err);
+        await botInstance.sendMessage(msg.chat.id, 'መታወቂያዎን ማውጣት አልተቻለም። እባክዎ ቆይተው እንደገና ይሞክሩ።');
+      }
+    });
+
+    // 4. 📊 MY ATTENDANCE (Exact status for recent days + summary KPIs + no screen flood)
+
+ // 4. 📊 MY ATTENDANCE (Exact status for recent days + summary KPIs + no screen flood)
+    botInstance.hears(['📊 የመገኘት ታሪክ', '📊 My Attendance', 'የመገኘት ታሪክ', '/attendance'], async (msg: any) => {
+      const telegramId = msg.from?.id;
+      if (!telegramId) return;
+
+      try {
+        const telegramWebAppUrl = 'https://t.me/attendanceforchurchbot/woldwahidsundayschool';
+
+        // Check if student exists by telegramId to get studentCode
+        const studentSnap = await db.collection('students').where('telegramId', '==', telegramId).get();
+        let studentCode = '';
+        let studentName = '';
+        if (!studentSnap.empty) {
+          const sData = studentSnap.docs[0].data();
+          studentCode = sData.code || '';
+          studentName = sData.fullNameAm || sData.fullNameEn || '';
+        }
+
+        const attSnap = await db.collection('attendance').get();
+        const records = attSnap.docs
+          .map((d: any) => ({ id: d.id, ...d.data() }))
+          .filter((a: any) => a.telegramId === telegramId || (studentCode && a.memberCode === studentCode))
+          .sort((a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+
+        if (records.length === 0) {
+          const emptyMsg = 
+            `📊 *የመገኘት መረጃ / Attendance Records*\n` +
+            `═══════════════════════\n\n` +
+            `በአሁኑ ሰዓት በእርስዎ ስም የተመዘገበ የመገኘት ታሪክ አልተገኘም።\n` +
+            `No attendance records logged yet.\n\n` +
+            (studentCode ? `🆔 የእርስዎ መታወቂያ: \`${studentCode}\`\n\n` : `💡 ማሳሰቢያ፡ መታወቂያዎን ለማረጋገጥ በመጀመሪያ "📝 Register as Student" ን ይጫኑ።\n\n`) +
+            `የተሟላ መረጃዎን በቴሌግራም ዌብ አፕ ለማየት ከታች ያለውን ቁልፍ ይጠቀሙ።`;
+
+          await botInstance.sendMessage(msg.chat.id, emptyMsg, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🚀 ቴሌግራም ዌብ አፕ ክፈት (Open Web App)', url: telegramWebAppUrl }]
+              ]
+            }
+          });
+          return;
+        }
+
+        // Exact Calculations
+        const total = records.length;
+        const presentCount = records.filter((r: any) => r.status !== 'absent').length;
+        const absentCount = records.filter((r: any) => r.status === 'absent').length;
+        const excusedCount = records.filter((r: any) => r.status === 'excused').length;
+        const rate = Math.round((presentCount / total) * 100);
+
+        // Visual progress bar
+        const filled = Math.min(10, Math.max(0, Math.round(rate / 10)));
+        const progressBar = '🟩'.repeat(filled) + '⬜'.repeat(10 - filled);
+
+        // Show only the 4 most recent sessions with exact status so it never floods the chat
+        const recentSessions = records.slice(0, 4);
+
+        let report = 
+          `📊 *የመገኘት መረጃና ክትትል (Attendance Overview)*\n` +
+          `👤 *ተማሪ:* ${studentName || msg.from?.first_name || 'ተማሪ'} ${studentCode ? `(\`${studentCode}\`)` : ''}\n` +
+          `═══════════════════════\n` +
+          `📈 *የተገኝነት ምጣኔ (Attendance Rate):* *${rate}%*\n` +
+          `${progressBar}\n\n` +
+          `📋 *አጠቃላይ ማጠቃለያ (Summary):*\n` +
+          `  • 🟢 የተገኙበት (Present): *${presentCount}*\n` +
+          `  • 🔴 የቀሩበት (Absent): *${absentCount}*\n` +
+          `  • 🟡 በፈቃድ (Excused): *${excusedCount}*\n` +
+          `  • 📌 ጠቅላላ ክፍለ-ጊዜያት: *${total}*\n\n` +
+          `🗓️ *የቅርብ ቀናት ዝርዝር ሁኔታ (Recent Sessions):*\n` +
+          `────────────────────────\n`;
+
+        recentSessions.forEach((rec: any, idx: number) => {
+          const ethDate = formatEthiopianDate(rec.date);
+          const gregDate = rec.date ? rec.date.split('T')[0] : 'N/A';
+          const isAbsent = rec.status === 'absent';
+          const isExcused = rec.status === 'excused';
+          const statusIcon = isAbsent ? '🔴' : isExcused ? '🟡' : '🟢';
+          const statusText = isAbsent ? 'አልተገኘም (Absent)' : isExcused ? 'በፈቃድ (Excused)' : 'ተገኝቷል (Present)';
+          const sessionName = rec.sessionName || 'የሰንበት ት/ቤት ክፍለ-ጊዜ';
+          const time = rec.timestamp || 'N/A';
+
+          report += 
+            `${idx + 1}. 📅 *${ethDate}* (${gregDate})\n` +
+            `   ${statusIcon} *ሁኔታ:* ${statusText}\n` +
+            `   ⏰ *ሰዓት:* ${time} | 📖 ${sessionName}\n\n`;
+        });
+
+        report += 
+          `────────────────────────\n` +
+          `💡 *የሁሉንም ቀናት ሙሉ ታሪክ* በቴሌግራም ዌብ አፕ ላይ በዝርዝር ማየት ይችላሉ፦`;
+
+        const keyboard = {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🚀 ሙሉ ታሪክ በዌብ አፕ ይመልከቱ (View Full History)', url: telegramWebAppUrl }]
+            ]
+          }
+        };
+
+        await botInstance.sendMessage(msg.chat.id, report, { parse_mode: 'Markdown', ...keyboard });
+      } catch (err) {
+        console.error('Error fetching exact attendance:', err);
+        await botInstance.sendMessage(msg.chat.id, 'የመገኘት መረጃን ማውጣት አልተቻለም።');
+      }
+    });
+
+    // 5. 📅 CLASS SCHEDULE (Matches user uploaded image layout)
+    const scheduleMenuText = 
+      `🗓️ *የወልድ ዋሕድ ሰንበት ት/ቤት መርሐ ግብር*\n\n` +
+      `መርሐ ግብሩን በምን መልኩ ማየት ይፈልጋሉ?\n` +
+      `ከታች ካሉት የክፍል ደረጃዎች አንዱን ይምረጡ፡-`;
+
+    const scheduleInlineKeyboard = {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '🧸 ቅድመ አንደኛ', callback_data: 'sch_pre_kg' },
+            { text: '🎒 1ኛ እና 2ኛ ክፍል', callback_data: 'sch_g1_2' },
+          ],
+          [
+            { text: '📚 3ኛ–5ኛ ክፍል', callback_data: 'sch_g3_5' },
+            { text: '🎓 6ኛ–9ኛ ክፍል', callback_data: 'sch_g6_9' },
+          ],
+          [
+            { text: '📅 አርብ', callback_data: 'sch_friday' },
+            { text: '📅 ቅዳሜ', callback_data: 'sch_saturday' },
+            { text: '📅 እሁድ', callback_data: 'sch_sunday' },
+          ],
+        ],
+      },
+    };
+
+    const scheduleBackKeyboard = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔙 ወደ መርሐ ግብር ማውጫ ተመለስ', callback_data: 'sch_menu' }]
+        ]
+      }
+    };
+
+    const getScheduleText = (key: string): string => {
+      switch (key) {
+        case 'sch_pre_kg':
+          return (
+            `🧸 *ቅድመ አንደኛ (Pre-KG) - እሁድ መርሐ ግብር*\n` +
+            `═══════════════════════════════\n\n` +
+            `• ጸሎት መክፈቻ | 3:30–3:40 (10 ደቂቃ) | ስነ ስርዓት ክፍል\n` +
+            `• ትምህርት | 3:40–4:00 (20 ደቂቃ) | ትምህርት ክፍል\n` +
+            `• መዝሙር | 4:00–4:15 (15 ደቂቃ) | መዝሙር ክፍል\n` +
+            `• አብነት | 4:15–4:30 (15 ደቂቃ) | አብነት ክፍል\n` +
+            `• ኪነ ጥበብ | 4:25–4:50 (25 ደቂቃ) | ኪነ ጥበብ ክፍል\n` +
+            `• ማስታወቂያ | 4:55–5:00 (5 ደቂቃ) | ስነስርዓት ክፍል\n\n` +
+            `⏰ *የክፍለ-ጊዜ ቆይታ:* 3:30 - 5:00`
+          );
+        case 'sch_g1_2':
+          return (
+            `🎒 *1ኛ እና 2ኛ ክፍል - እሁድ መርሐ ግብር*\n` +
+            `═══════════════════════════════\n\n` +
+            `• ጸሎት መክፈቻ | 3:30–3:35 (5 ደቂቃ) | ስነስርዓት ክፍል\n` +
+            `• ትምህርት | 3:35–4:05 (30 ደቂቃ) | ትምህርት ክፍል\n` +
+            `• ኪነጥበብ | 4:05–4:25 (20 ደቂቃ) | ኪነጥበብ ክፍል\n` +
+            `• አብነት | 4:25–4:50 (25 ደቂቃ) | አብነት ክፍል\n` +
+            `• መዝሙር | 4:50–5:20 (30 ደቂቃ) | መዝሙር ክፍል\n` +
+            `• ማስታወቂያ | 5:20–5:30 (10 ደቂቃ) | ስነስርዓት ክፍል\n\n` +
+            `⏰ *የክፍለ-ጊዜ ቆይታ:* 3:30 - 5:30`
+          );
+        case 'sch_g3_5':
+          return (
+            `📚 *3ኛ–5ኛ ክፍል - የሳምንቱ መርሐ ግብር*\n` +
+            `═══════════════════════════════\n\n` +
+            `📅 *ቅዳሜ (Saturday):*\n` +
+            `• መክፈቻ ጸሎት | 8:00–8:05 (5 ደቂቃ) | ስነስርዓት ክፍል\n` +
+            `• ትምህርት | 8:05–9:00 (55 ደቂቃ) | ትምህርት ክፍል\n` +
+            `• ኪነ ጥበብ | 9:00–9:45 (45 ደቂቃ) | ኪነ ጥበብ ክፍል\n` +
+            `• ማስታወቂያ | 9:50–10:00 (10 ደቂቃ) | ስነስርዓት ክፍል\n\n` +
+            `📅 *እሁድ (Sunday):*\n` +
+            `• መክፈቻ ጸሎት | 5:30–5:55 (25 ደቂቃ) | ስነስርዓት ክፍል\n` +
+            `• ትምህርት | 5:55–6:45 (50 ደቂቃ) | ትምህርት ክፍል\n` +
+            `• መዝሙር | 6:45–7:35 (50 ደቂቃ) | መዝሙር ክፍል\n` +
+            `• አብነት | 7:35–7:50 (15 ደቂቃ) | አብነት ክፍል`
+          );
+        case 'sch_g6_9':
+          return (
+            `🎓 *6ኛ–9ኛ ክፍል - የሳምንቱ መርሐ ግብር*\n` +
+            `═══════════════════════════════\n\n` +
+            `📅 *አርብ (Friday):*\n` +
+            `• ጸሎት | 11:30–11:50 (20 ደቂቃ) | ስነስርዓት ክፍል\n` +
+            `• ኪነጥበብ | 11:50–12:30 (40 ደቂቃ) | ኪነጥበብ ክፍል\n\n` +
+            `📅 *ቅዳሜ (Saturday):*\n` +
+            `• መክፈቻ ጸሎት | 10:30–10:35 (5 ደቂቃ) | ስነስርዓት ክፍል\n` +
+            `• ትምህርት | 10:35–11:25 (50 ደቂቃ) | ትምህርት ክፍል\n` +
+            `• ማስታወቂያ | 11:25–11:30 (5 ደቂቃ) | ስነስርዓት ክፍል\n\n` +
+            `📅 *እሁድ (Sunday):*\n` +
+            `• ጸሎት | 8:00–8:20 (20 ደቂቃ) | ስነስርዓት ክፍል\n` +
+            `• ትምህርት | 8:20–9:20 (60 ደቂቃ) | ትምህርት ክፍል\n` +
+            `• አብነት | 9:20–9:50 (30 ደቂቃ) | አብነት ክፍል\n` +
+            `• መዝሙር እና ወረብ | 9:50–10:55 (65 ደቂቃ) | መዝሙር ክፍል`
+          );
+        case 'sch_friday':
+          return (
+            `📅 *የአርብ (Friday) ክፍለ-ጊዜያት*\n` +
+            `═══════════════════════════════\n\n` +
+            `🎓 *6ኛ–9ኛ ክፍል:*\n` +
+            `• ጸሎት | 11:30–11:50 | ስነስርዓት ክፍል\n` +
+            `• ኪነ ጥበብ | 11:50–12:30 | ኪነ ጥበብ ክፍል\n\n` +
+            `🕊️ *የጋራ ጸሎት:*\n` +
+            `• በየወሩ በ7 እና 14 ጸሎት (11:30–12:00)`
+          );
+        case 'sch_saturday':
+          return (
+            `📅 *የቅዳሜ (Saturday) ክፍለ-ጊዜያት*\n` +
+            `═══════════════════════════════\n\n` +
+            `📚 *3ኛ–5ኛ ክፍል:*\n` +
+            `• 8:00–10:00 (ጸሎት፣ ትምህርትና ኪነ ጥበብ)\n\n` +
+            `🎓 *6ኛ–9ኛ ክፍል:*\n` +
+            `• 10:30–11:30 (ጸሎት፣ ትምህርትና ማስታወቂያ)`
+          );
+        case 'sch_sunday':
+          return (
+            `📅 *የእሁድ (Sunday) ክፍለ-ጊዜያት*\n` +
+            `═══════════════════════════════\n\n` +
+            `🧸 *ቅድመ አንደኛ:* 3:30 - 5:00\n` +
+            `🎒 *1ኛ እና 2ኛ ክፍል:* 3:30 - 5:30\n` +
+            `📚 *3ኛ–5ኛ ክፍል:* 5:30 - 7:50\n` +
+            `🎓 *6ኛ–9ኛ ክፍል:* 8:00 - 10:55`
+          );
+        default:
+          return '';
+      }
+    };
+
+    // Open Schedule Menu
+    botInstance.hears(['📅 Class Schedule', '/schedule', 'መርሐ ግብር', 'የክፍል መርሐ ግብር'], async (ctx: any) => {
+      await botInstance.sendMessage(msg.chat.id,scheduleMenuText, { parse_mode: 'Markdown', ...scheduleInlineKeyboard });
+    });
+
+    // Callback query listener for inline schedule buttons
+    if (typeof botInstance.on === 'function') {
+      botInstance.on('callback_query', async (ctx: any) => {
+        const cq = ctx.update?.callback_query || ctx.callbackQuery || ctx;
+        const data = cq?.data;
+        const chatId = cq?.message?.chat?.id || ctx.chat?.id;
+        const cqId = cq?.id;
+
+        // Acknowledge callback query
+        if (cqId) {
+          try {
+            if (typeof ctx.api?.answerCallbackQuery === 'function') {
+              await ctx.api.answerCallbackQuery({ callback_query_id: cqId }).catch(() => {});
+            } else {
+              await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ callback_query_id: cqId }),
+              }).catch(() => {});
+            }
+          } catch (_) {}
+        }
+
+        if (!data || !chatId) return;
+
+        try {
+          if (data === 'sch_menu') {
+            await botInstance.sendMessage(chatId, scheduleMenuText, { parse_mode: 'Markdown', ...scheduleInlineKeyboard });
+          } else {
+            const text = getScheduleText(data);
+            if (text) {
+              await botInstance.sendMessage(chatId, text, { parse_mode: 'Markdown', ...scheduleBackKeyboard });
+            }
+          }
+        } catch (err) {
+          console.warn('Callback query error:', err);
+        }
+      });
+    }
+
+    // Direct text button fallbacks for schedule (ensures buttons work 100% on any client)
+    botInstance.hears(['🧸 ቅድመ አንደኛ', 'ቅድመ አንደኛ', 'Pre-KG'], async (ctx: any) => {
+      await ctx.reply(getScheduleText('sch_pre_kg'), { parse_mode: 'Markdown', ...scheduleBackKeyboard });
+    });
+
+    botInstance.hears(['🎒 1ኛ እና 2ኛ ክፍል', '1ኛ እና 2ኛ ክፍል', '1ኛ እና 2ኛ'], async (ctx: any) => {
+      await ctx.reply(getScheduleText('sch_g1_2'), { parse_mode: 'Markdown', ...scheduleBackKeyboard });
+    });
+
+    botInstance.hears(['📚 3ኛ–5ኛ ክፍል', '3ኛ–5ኛ ክፍል', '3ኛ–5ኛ'], async (ctx: any) => {
+      await ctx.reply(getScheduleText('sch_g3_5'), { parse_mode: 'Markdown', ...scheduleBackKeyboard });
+    });
+
+    botInstance.hears(['🎓 6ኛ–9ኛ ክፍል', '6ኛ–9ኛ ክፍል', '6ኛ–9ኛ'], async (ctx: any) => {
+      await ctx.reply(getScheduleText('sch_g6_9'), { parse_mode: 'Markdown', ...scheduleBackKeyboard });
+    });
+
+    botInstance.hears(['📅 አርብ', 'አርብ', 'Friday'], async (ctx: any) => {
+      await ctx.reply(getScheduleText('sch_friday'), { parse_mode: 'Markdown', ...scheduleBackKeyboard });
+    });
+
+    botInstance.hears(['📅 ቅዳሜ', 'ቅዳሜ', 'Saturday'], async (ctx: any) => {
+      await ctx.reply(getScheduleText('sch_saturday'), { parse_mode: 'Markdown', ...scheduleBackKeyboard });
+    });
+
+    botInstance.hears(['📅 እሁድ', 'እሁድ', 'Sunday'], async (ctx: any) => {
+      await ctx.reply(getScheduleText('sch_sunday'), { parse_mode: 'Markdown', ...scheduleBackKeyboard });
+    });
+
+    botInstance.hears(['🔙 ወደ መርሐ ግብር ማውጫ ተመለስ', 'ወደ መርሐ ግብር ማውጫ ተመለስ', 'መርሐ ግብር ማውጫ'], async (ctx: any) => {
+      await ctx.reply(scheduleMenuText, { parse_mode: 'Markdown', ...scheduleInlineKeyboard });
+    });
+
+    // 📱 DOWNLOAD WOLD WAHID APK & TELEGRAM WEB APP
+    botInstance.hears(['📱 የሞባይል መተግበሪያ', '📱 Download Wold Wahid APK', 'መተግበሪያ', '/apk', '/app'], async (ctx: any) => {
+      const telegramWebAppUrl = 'https://t.me/attendanceforchurchbot/woldwahidsundayschool';
+      const webUrl = 'https://ais-dev-reccyxuqfinpjq7hy5yle5-147288418331.europe-west2.run.app';
+      const apkUrl = `${webUrl}/WoldWahid.apk`;
+      const msg = 
+        `📱 *የወልድ ዋሕድ ሰንበት ት/ቤት መተግበሪያ (Wold Wahid App)*\n` +
+        `⛪ *መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን*\n` +
+        `═══════════════════════════════\n\n` +
+        `የሰንበት ትምህርት ቤቱን መተግበሪያ በስልክዎ ለመጠቀም ያሉ አማራጮች፦\n\n` +
+        `✨ *1. በቴሌግራም ዌብ አፕ (Telegram Web App):*\n` +
+        `ምንም አይነት ጭነት ሳያስፈልግዎት በቀጥታ በቴሌግራም ዲጂታል መታወቂያዎን፣ የመገኘት ታሪክዎንና ሳምንታዊ መርሐ ግብርዎን ለመክፈት ከታች ያለውን *"ቴሌግራም ዌብ አፕ ክፈት"* ቁልፍ ይጫኑ።\n\n` +
+        `🍏 *2. ለአይፎን (iOS iPhone / iPad):*\n` +
+        `በ Safari ብሮውዘር ሊንኩን ይክፈቱ ➔ የ Share ምልክቱን ይጫኑ ➔ *"Add to Home Screen (ወደ መነሻ ገጽ ጨምር)"* የሚለውን ይምረጡ። እንደ ማንኛውም የተጫነ መተግበሪያ ከመስመር ውጭ (Offline) ይሰራል።\n\n` +
+        `🤖 *3. ለአንድሮይድ (Android APK):*\n` +
+        `የ Android መተግበሪያውን በቀጥታ በስልክዎ ላይ ለመጫን ከታች ያለውን *"WoldWahid.apk አውርድ"* ቁልፍ ይጫኑ።`;
+
+      const keyboard = {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🚀 ቴሌግራም ዌብ አፕ ክፈት (Open Web App)', url: telegramWebAppUrl }],
+            [{ text: '📥 WoldWahid.apk አውርድ (Direct APK)', url: apkUrl }],
+            [{ text: '🌐 የድር መተግበሪያ (Web Portal)', url: webUrl }],
+          ],
+        },
+      };
+
+      await ctx.reply(msg, { parse_mode: 'Markdown', ...keyboard });
+    });
+
+    // 6. ✉️ LEAVE REQUEST WIZARD
+    botInstance.hears(['✉️ የፈቃድ መጠየቂያ', '✉️ Leave Request', 'የፈቃድ መጠየቂያ', 'ፈቃድ', '/leave'], async (ctx: any) => {
+      const telegramId = ctx.from?.id;
+      if (!telegramId) return;
+
+      userSessions.set(telegramId, {
+        action: 'leave',
+        step: 'type',
+        data: {}
+      });
+
+      const leaveTypesKeyboard = {
+        reply_markup: {
+          keyboard: [
+            [{ text: '🏥 Medical (የጤና)' }, { text: '✈️ Travel (የጉዞ)' }],
+            [{ text: '📚 Academic (የትምህርት ፈተና)' }, { text: '👨‍👩‍👧 Family (የቤተሰብ)' }],
+            [{ text: '❓ Other (ሌላ)' }],
+            [{ text: '❌ Cancel (ይቅር)' }]
+          ],
+          resize_keyboard: true,
+        }
+      };
+
+      await ctx.reply(
+        '✉️ *የፈቃድ መጠየቂያ (Leave Request)*\n\nእባክዎ የፈቃድ አይነት ይምረጡ / Please select the reason for leave:',
+        leaveTypesKeyboard
+      );
+    });
+
+    // 7. 💬 SUPPORT & HELP WIZARD
+    botInstance.hears(['💬 ድጋፍና እርዳታ', '💬 Support & Help', 'ድጋፍና እርዳታ', 'ድጋፍ', '/support'], async (ctx: any) => {
+      const telegramId = ctx.from?.id;
+      if (!telegramId) return;
+
+      userSessions.set(telegramId, {
+        action: 'support',
+        step: 'category',
+        data: {}
+      });
+
+      const supportKeyboard = {
+        reply_markup: {
+          keyboard: [
+            [{ text: '🙏 Prayer Request (የጸሎት ጥያቄ)' }, { text: '🏠 Visitation (የቤት ጥየቃ)' }],
+            [{ text: '🤝 Welfare / Aid (የድጋፍ እርዳታ)' }, { text: '🗣 Counseling (ምክር)' }],
+            [{ text: '❓ General Inquiry (አጠቃላይ ጥያቄ)' }],
+            [{ text: '❌ Cancel (ይቅር)' }]
+          ],
+          resize_keyboard: true,
+        }
+      };
+
+      await ctx.reply(
+        '💬 *የድጋፍ እና እርዳታ መስጫ (Support Desk)*\n\nእባክዎ የሚፈልጉትን የድጋፍ ዘርፍ ይምረጡ / Please select the category:',
+        supportKeyboard
+      );
+    });
+
+    // GENERIC MESSAGE HANDLER FOR CONVERSATIONAL WIZARDS
+    botInstance.on('message', async (ctx: any) => {
+      const text = ctx.message?.text?.trim();
+      const telegramId = ctx.from?.id;
+      if (!text || !telegramId) return;
+
+      // Ignore if user typed a menu button
+      const menuKeywords = [
+        '📝 የተማሪ ምዝገባ', '📝 Register as Student',
+        '🔍 የምዝገባ ሁኔታ', '🔍 My Registration',
+        '👤 የኔ መታወቂያና QR', '👤 My QR / Profile',
+        '📊 የመገኘት ታሪክ', '📊 My Attendance',
+        '📅 የትምህርት መርሐ ግብር', '📅 Class Schedule',
+        '✉️ የፈቃድ መጠየቂያ', '✉️ Leave Request',
+        '📱 የሞባይል መተግበሪያ', '📱 Download Wold Wahid APK',
+        '💬 ድጋፍና እርዳታ', '💬 Support & Help',
+        '❌ Cancel (ይቅር)', 'ይቅር'
+      ];
+      if (menuKeywords.includes(text)) return;
+
+      const session = userSessions.get(telegramId);
+      if (!session) return;
+
+      // ─── REGISTRATION WIZARD STEPS ───
+      // ─── REGISTRATION WIZARD STEPS (10 FIELDS) ───
+      if (session.action === 'register') {
+        if (session.step === 'name') {
+          session.data.name = text;
+          session.step = 'christianName';
+          await ctx.reply(
+            '✝️ *የክርስትና ስም ያስገቡ (Step 2/10):*\nPlease enter your Christian Name:\n(ምሳሌ፡ ወልደ ማርያም)',
+            cancelKeyboard
+          );
+        } else if (session.step === 'christianName') {
+          session.data.christianName = text;
+          session.step = 'gender';
+          const genderKeyboard = {
+            reply_markup: {
+              keyboard: [
+                [{ text: 'ወንድ (Male)' }, { text: 'ሴት (Female)' }],
+                [{ text: '❌ Cancel (ይቅር)' }]
+              ],
+              resize_keyboard: true,
+            }
+          };
+          await ctx.reply(
+            '👤 *ጾታ ይምረጡ (Step 3/10):*\nPlease select your Gender:',
+            genderKeyboard
+          );
+        } else if (session.step === 'gender') {
+          session.data.gender = text.includes('ወንድ') || text.toLowerCase().includes('male') ? 'male' : 'female';
+          session.step = 'birthDate';
+          await ctx.reply(
+            '📅 *የትውልድ ዘመን ወይም ዕድሜ ያስገቡ (Step 4/10):*\nPlease enter your Birth Date / Age:\n(ምሳሌ፡ 1998 ዓ.ም)',
+            cancelKeyboard
+          );
+        } else if (session.step === 'birthDate') {
+          session.data.birthDate = text;
+          session.step = 'phone';
+          await ctx.reply(
+            '📱 *ስልክ ቁጥርዎን ያስገቡ (Step 5/10):*\nPlease enter your Phone Number:\n(ምሳሌ፡ 0911234567)',
+            cancelKeyboard
+          );
+        } else if (session.step === 'phone') {
+          session.data.phone = text;
+          session.step = 'address';
+          await ctx.reply(
+            '📍 *የመኖሪያ አድራሻ (ወረዳ / ሰፈር) ያስገቡ (Step 6/10):*\nPlease enter your Address (Woreda / Subcity):\n(ምሳሌ፡ ቦሌ ወረዳ 03)',
+            cancelKeyboard
+          );
+        } else if (session.step === 'address') {
+          session.data.address = text;
+          session.step = 'emergencyName';
+          await ctx.reply(
+            '🛡️ *የቅርብ ተጠሪ ስም ያስገቡ (Step 7/10):*\nPlease enter Emergency Contact Name:',
+            cancelKeyboard
+          );
+        } else if (session.step === 'emergencyName') {
+          session.data.emergencyName = text;
+          session.step = 'emergencyPhone';
+          await ctx.reply(
+            '📞 *የቅርብ ተጠሪ ስልክ ቁጥር ያስገቡ (Step 8/10):*\nPlease enter Emergency Contact Phone:',
+            cancelKeyboard
+          );
+        } else if (session.step === 'emergencyPhone') {
+          session.data.emergencyPhone = text;
+          session.step = 'department';
+          const deptKeyboard = {
+            reply_markup: {
+              keyboard: [
+                [{ text: 'ትምህርት ክፍል (Education)' }, { text: 'መዝሙር ክፍል (Choir)' }],
+                [{ text: 'ኪነ-ጥበብ ክፍል (Arts)' }, { text: 'አብነት ክፍል (Abnet)' }],
+                [{ text: 'ስነ-ስርዓት ክፍል (Discipline)' }, { text: 'አጠቃላይ አባል (General)' }],
+                [{ text: '❌ Cancel (ይቅር)' }]
+              ],
+              resize_keyboard: true,
+            }
+          };
+          await ctx.reply(
+            '⛪ *የሰንበት ት/ቤት ክፍል ይምረጡ (Step 9/10):*\nSelect your Sunday School Department:',
+            deptKeyboard
+          );
+        } else if (session.step === 'department') {
+          session.data.department = text;
+          session.step = 'photo';
+          await ctx.reply(
+            '📸 *የመገለጫ ፎቶ ሊንክ ወይም ፎቶ ይላኩ (Step 10/10):*\nPlease send your profile photo or photo link:\n(ወይንም "없음" / "None" ብለው መጻፍ ይችላሉ)',
+            cancelKeyboard
+          );
+        } else if (session.step === 'photo') {
+          session.data.photo = text;
+
+          // Save to Firestore 'registrations' collection with all 10 fields
+          try {
+            await db.collection('registrations').add({
+              fullNameAm: session.data.name,
+              fullNameEn: session.data.name,
+              christianName: session.data.christianName,
+              gender: session.data.gender,
+              birthDate: session.data.birthDate,
+              phone: session.data.phone,
+              address: session.data.address,
+              emergencyName: session.data.emergencyName,
+              emergencyPhone: session.data.emergencyPhone,
+              department: session.data.department,
+              photoUrl: session.data.photo && session.data.photo !== 'None' ? session.data.photo : '',
+              status: 'pending',
+              telegramId: telegramId,
+              telegramUsername: ctx.from?.username || '',
+              submittedAt: new Date().toISOString()
+            });
+
+            userSessions.delete(telegramId);
+
+            const successMsg = 
+              `🎉 *የተማሪ ምዝገባ (10ቱ መስኮች) በተሳካ ሁኔታ ተልኳል!*\n` +
+              `*Registration Submitted Successfully!*\n\n` +
+              `📋 *የመረጃ ማጠቃለያ (10 Fields Summary):*\n` +
+              `1. ሙሉ ስም: ${session.data.name}\n` +
+              `2. የክርስትና ስም: ${session.data.christianName}\n` +
+              `3. ጾታ: ${session.data.gender}\n` +
+              `4. የትውልድ ዘመን: ${session.data.birthDate}\n` +
+              `5. ስልክ: ${session.data.phone}\n` +
+              `6. አድራሻ: ${session.data.address}\n` +
+              `7. ተጠሪ ስም: ${session.data.emergencyName}\n` +
+              `8. ተጠሪ ስልክ: ${session.data.emergencyPhone}\n` +
+              `9. ክፍል: ${session.data.department}\n` +
+              `10. ፎቶ: የተካተተ\n\n` +
+              `⏳ *ሁኔታ:* በመጠባበቅ ላይ (Pending Review)\n\n` +
+              `አስተዳዳሪው ሲያፀድቅ የተማሪ መታወቂያዎ ይደርስዎታል።`;
+
+            await ctx.reply(successMsg, { parse_mode: 'Markdown', ...mainMenuKeyboard });
+          } catch (saveErr) {
+            console.error('Failed to save registration:', saveErr);
+            await ctx.reply('ምዝገባውን ማስቀመጥ አልተቻለም። እባክዎ እንደገና ይሞክሩ።', mainMenuKeyboard);
+          }
+        }
+        return;
+      }
+
+      // ─── SUPPORT TICKET WIZARD STEPS ───
+      if (session.action === 'support') {
+        if (session.step === 'category') {
+          session.data.category = text;
+          session.step = 'description';
+          await ctx.reply(
+            '📝 *የጥያቄዎን ወይም የድጋፍ ፍላጎትዎን ዝርዝር ይጻፉ:*\nPlease describe your request or message in detail:',
+            cancelKeyboard
+          );
+        } else if (session.step === 'description') {
+          session.data.description = text;
+          const ticketNumber = 'WW-SPT-' + Math.floor(1000 + Math.random() * 9000);
+
+          try {
+            await db.collection('support_tickets').add({
+              ticketNumber,
+              category: session.data.category,
+              description: session.data.description,
+              requesterName: ctx.from?.first_name || 'Sunday School Member',
+              telegramId: telegramId,
+              telegramUsername: ctx.from?.username || '',
+              status: 'new',
+              priority: 'medium',
+              createdAt: new Date().toISOString()
+            });
+
+            userSessions.delete(telegramId);
+
+            await ctx.reply(
+              `✅ *የድጋፍ ጥያቄዎ ተመዝግቧል!*\n` +
+              `*Support Ticket Created!*\n\n` +
+              `🎫 *Ticket #:* \`${ticketNumber}\`\n` +
+              `📂 *Category:* ${session.data.category}\n\n` +
+              `የሰንበት ት/ቤት አመራሮች ጥያቄዎን ተመልክተው በአጭር ጊዜ ውስጥ ያነጋግሩዎታል።`,
+              { parse_mode: 'Markdown', ...mainMenuKeyboard }
+            );
+          } catch (err) {
+            console.error('Failed to create ticket:', err);
+            await ctx.reply('ጥያቄውን ማስተናገድ አልተቻለም። እባክዎ ቆይተው ይሞክሩ።', mainMenuKeyboard);
+          }
+        }
+        return;
+      }
+
+      // ─── LEAVE REQUEST WIZARD STEPS ───
+      if (session.action === 'leave') {
+        if (session.step === 'type') {
+          session.data.leaveType = text;
+          session.step = 'duration';
+          await ctx.reply(
+            '📅 *የፈቃድ ጊዜውን ያስገቡ:*\nPlease enter the duration or dates of leave:\n(ምሳሌ፡ ለ 2 ሳምንት / ከጥቅምት 10 እስከ 24)',
+            cancelKeyboard
+          );
+        } else if (session.step === 'duration') {
+          session.data.duration = text;
+          session.step = 'reason';
+          await ctx.reply(
+            '📝 *የፈቃዱን ዝርዝር ምክንያት ይግለጹ:*\nPlease provide the detailed reason for your leave:',
+            cancelKeyboard
+          );
+        } else if (session.step === 'reason') {
+          session.data.reason = text;
+          const requestNumber = 'WW-LV-' + Math.floor(100 + Math.random() * 900);
+
+          try {
+            await db.collection('leave_requests').add({
+              requestNumber,
+              studentName: ctx.from?.first_name || 'Student',
+              telegramId: telegramId,
+              telegramUsername: ctx.from?.username || '',
+              leaveType: session.data.leaveType,
+              duration: session.data.duration,
+              reason: session.data.reason,
+              status: 'pending',
+              createdAt: new Date().toISOString()
+            });
+
+            userSessions.delete(telegramId);
+
+            await ctx.reply(
+              `✅ *የፈቃድ ጥያቄዎ ተመዝግቧል!*\n` +
+              `*Leave Request Submitted!*\n\n` +
+              `📋 *Request #:* \`${requestNumber}\`\n` +
+              `⏳ *Status:* በመጠባበቅ ላይ (Pending Review)\n\n` +
+              `የክፍል ኃላፊዎ ጥያቄዎን መርምረው ውሳኔውን ያሳውቁዎታል።`,
+              { parse_mode: 'Markdown', ...mainMenuKeyboard }
+            );
+          } catch (err) {
+            console.error('Failed to submit leave request:', err);
+            await ctx.reply('የፈቃድ ጥያቄውን ማስገባት አልተቻለም።', mainMenuKeyboard);
+          }
+        }
+        return;
+      }
+    });
+
+    // Handle polling error events gracefully (e.g. 409 Conflict if another instance is running)
+    let hasLogged409 = false;
+    if (typeof botInstance.on === 'function') {
+      botInstance.on('polling_error', (err: any) => {
+        const errorMsg = err?.message || String(err);
+        if (errorMsg.includes('409') || errorMsg.includes('Conflict')) {
+          if (!hasLogged409) {
+            console.warn('⚠️ Telegram bot polling notice: Another bot instance is currently active or polling (409 Conflict). Retrying automatically in background.');
+            hasLogged409 = true;
+          }
+          return;
+        }
+        console.warn('Telegram bot polling warning:', errorMsg);
+      });
+    }
+
+    // Start background polling safely with explicit callback_query support
+    
+
+    console.log('✅ Real interactive Telegram bot initialized successfully.');
+  } catch (err) {
+    console.error('Failed to initialize Telegram bot:', err);
+  }
+}
+
+export const bot = botInstance;

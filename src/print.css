@@ -1,0 +1,134 @@
+@media print {
+  html, body {
+    background: white !important;
+    color: black !important;
+    height: auto !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  /* Reset fixed modal overlay wrappers so printing flows naturally without viewport clipping */
+  .fixed,
+  [class*="fixed"],
+  [class*="overflow-y-auto"],
+  [class*="max-h-"] {
+    position: static !important;
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 10mm 15mm;
+  }
+
+  #batch-print-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 15mm !important;
+    background: white !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    width: 100% !important;
+  }
+
+  .batch-card-wrapper {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    margin-bottom: 0 !important;
+    width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
+  }
+
+  /* Force page break after every 2 cards so max 2 cards (up and down) fit on each page */
+  .batch-card-wrapper:nth-child(2n) {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .batch-card-item {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    box-shadow: none !important;
+    border: 1.5pt solid #d97706 !important;
+    background: #062414 !important;
+    color: white !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    width: 115mm !important;
+    height: 72mm !important;
+    padding: 14pt !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    box-sizing: border-box !important;
+    border-radius: 14pt !important;
+    margin: 8mm auto !important;
+  }
+
+  .batch-card-item img,
+  #printable-single-badge img {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    display: block !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+  }
+
+  /* Specific fix for single card printing */
+  #printable-single-badge {
+    position: relative !important;
+    margin: 30mm auto !important; 
+    width: 105mm !important;
+    height: 66mm !important;
+    box-shadow: none !important;
+    border: 1.5pt solid #f59e0b !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    background: #062414 !important;
+    color: white !important;
+    border-radius: 12pt !important;
+    padding: 12pt !important;
+    box-sizing: border-box !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    overflow: hidden !important;
+    transform: scale(0.98) !important;
+    transform-origin: top center !important;
+  }
+
+  /* Ensure the single card container doesn't restrict print flow */
+  .fixed.inset-0.z-50.bg-slate-950\/80.backdrop-blur-md {
+    position: static !important;
+    display: block !important;
+    background: white !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+}
+
+
+
