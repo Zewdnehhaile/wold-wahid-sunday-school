@@ -5,7 +5,7 @@ import { t } from '../utils/translations';
 import {
   db,
   collection,
-  onSnapshot,
+  getDocs,
   setDoc,
   doc,
   deleteDoc,
@@ -72,37 +72,42 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 
   const dict = t[lang];
 
-  // Firestore sync listener
+  // Firestore one-time sync fetch
   useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, 'schedules'), limit(50)), (snapshot) => {
-      if (!snapshot.empty) {
-        const fetched: ScheduleItem[] = snapshot.docs.map((docSnap: any) => {
-          const d = docSnap.data();
-          return {
-            id: docSnap.id,
-            day: d.day || 'sunday',
-            dayAm: d.dayAm || (d.day === 'friday' ? 'አርብ' : d.day === 'saturday' ? 'ቅዳሜ' : 'እሁድ'),
-            dayEn: d.dayEn || (d.day === 'friday' ? 'Friday' : d.day === 'saturday' ? 'Saturday' : 'Sunday'),
-            gradeLevel: d.gradeLevel || 'pre_kg',
-            gradeAm: d.gradeAm || 'ቅድመ አንደኛ',
-            gradeEn: d.gradeEn || 'Pre-KG',
-            activity: d.activity || '',
-            timeRange: d.timeRange || '',
-            departmentResponsible: d.departmentResponsible || 'ትምህርት ክፍል',
-            departmentKey: d.departmentKey || 'education',
-          };
-        });
-        setSchedules(fetched);
-        localStorage.setItem('ww_schedule_data', JSON.stringify(fetched));
-      } else {
-        // If firestore is empty, seed initial schedule or use local
-        localStorage.setItem('ww_schedule_data', JSON.stringify(WOLD_WAHID_SCHEDULE));
-      }
-    }, (error) => {
-      console.warn('Firestore schedule listener fallback:', error);
-    });
+    let active = true;
+    getDocs(query(collection(db, 'schedules'), limit(50)))
+      .then((snapshot) => {
+        if (!active) return;
+        if (!snapshot.empty) {
+          const fetched: ScheduleItem[] = snapshot.docs.map((docSnap: any) => {
+            const d = docSnap.data();
+            return {
+              id: docSnap.id,
+              day: d.day || 'sunday',
+              dayAm: d.dayAm || (d.day === 'friday' ? 'አርብ' : d.day === 'saturday' ? 'ቅዳሜ' : 'እሁድ'),
+              dayEn: d.dayEn || (d.day === 'friday' ? 'Friday' : d.day === 'saturday' ? 'Saturday' : 'Sunday'),
+              gradeLevel: d.gradeLevel || 'pre_kg',
+              gradeAm: d.gradeAm || 'ቅድመ አንደኛ',
+              gradeEn: d.gradeEn || 'Pre-KG',
+              activity: d.activity || '',
+              timeRange: d.timeRange || '',
+              departmentResponsible: d.departmentResponsible || 'ትምህርት ክፍል',
+              departmentKey: d.departmentKey || 'education',
+            };
+          });
+          setSchedules(fetched);
+          localStorage.setItem('ww_schedule_data', JSON.stringify(fetched));
+        } else {
+          localStorage.setItem('ww_schedule_data', JSON.stringify(WOLD_WAHID_SCHEDULE));
+        }
+      })
+      .catch((error) => {
+        console.warn('Firestore schedule fetch fallback:', error);
+      });
 
-    return () => unsub();
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Grade meta definitions

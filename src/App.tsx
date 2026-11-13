@@ -7,7 +7,7 @@ import {
   AVATAR_MALE,
   AVATAR_FEMALE,
 } from './data/initialData';
-import { db, collection, onSnapshot, doc, getDoc, addDoc, updateDoc, deleteDoc, getDocs, query, where, setDoc, limit } from './firebase';
+import { db, collection, doc, getDoc, addDoc, updateDoc, deleteDoc, getDocs, query, where, setDoc, limit } from './firebase';
 import { t } from './utils/translations';
 import { getPhotoUrl } from './utils/photoUtils';
 import { MemberList } from './components/MemberList';
@@ -48,7 +48,6 @@ import {
   CheckCircle2,
   X,
   KeyRound,
-  AlertTriangle,
 } from 'lucide-react';
 
 export default function App() {
@@ -56,12 +55,16 @@ export default function App() {
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
   const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
   const [approvalBanner, setApprovalBanner] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [quotaExceeded, setQuotaExceeded] = useState(false);
 
   const handleSnapshotError = (name: string) => (error: any) => {
-    console.error(`${name} snapshot error:`, error);
-    if (error?.message?.includes('Quota limit exceeded') || error?.code === 'resource-exhausted' || error?.message?.includes('quota')) {
-      setQuotaExceeded(true);
+    const isQuota =
+      error?.message?.includes('Quota limit exceeded') ||
+      error?.code === 'resource-exhausted' ||
+      error?.message?.includes('quota');
+    if (isQuota) {
+      console.warn(`${name} cache fallback active.`, error?.message || error);
+    } else {
+      console.error(`${name} data error:`, error);
     }
   };
 
@@ -113,104 +116,111 @@ export default function App() {
   const [isCardStudioOpen, setIsCardStudioOpen] = useState(false);
   const [studioTargetMember, setStudioTargetMember] = useState<Member | null>(null);
 
-  // Real-time Firestore subscriptions
-  useEffect(() => {
-    // 1. Listen to real-time pending & approved registrations (Limited to 200 most recent)
-    const unsubReg = onSnapshot(
-      query(collection(db, 'registrations'), limit(200)),
-      (snap) => {
-        const regList: Member[] = snap.docs
-          .filter((docSnap: any) => docSnap.data()?.status !== 'deleted')
-          .map((docSnap: any) => {
-            const d = docSnap.data();
-            const isApproved = d.status === 'approved' || d.status === 'active';
-            const isRejected = d.status === 'rejected';
-            return {
-              id: docSnap.id,
-              code: d.studentCode || d.code || `PENDING-${d.telegramId ? String(d.telegramId).slice(-4) : docSnap.id.slice(0, 4)}`,
-              fullNameAm: d.fullNameAm || d.fullNameEn || d.nameAm || 'ያልተገለጸ ስም',
-              fullNameEn: d.fullNameEn || d.fullNameAm || d.nameEn || 'Unnamed Student',
-              phone: d.phone || '',
-              gender: d.gender === 'female' ? 'female' : 'male',
-              department: d.department || 'education',
-              gradeLevel: d.gradeLevel || 'general',
-              roleAm: 'ተማሪ / Student',
-              roleEn: 'Student',
-              christianName: d.christianName || '',
-              birthYear: d.birthYear || d.birthDate || '',
-              photoUrl: getPhotoUrl(d.photoUrl, d.gender === 'female' ? 'female' : 'male'),
-              registeredDate: d.submittedAt?.split('T')[0] || new Date().toISOString().split('T')[0],
-              bloodGroup: d.bloodGroup || 'O+',
-              emergencyContact: d.emergencyContact || { 
-                name: d.emergencyName || '', 
-                phone: d.emergencyPhone || '', 
-                relation: d.emergencyRelation || 'ቤተሰብ / Family' 
-              },
-              subcity: d.subcity || d.address || '',
-              status: isApproved ? 'active' : (isRejected ? 'rejected' : 'pending_approval'),
-              telegramId: d.telegramId || '',
-              telegramUsername: d.telegramUsername || '',
-              approvedBy: d.approvedBy,
-              approvedAt: d.approvedAt,
-              rejectedBy: d.rejectedBy,
-              rejectedAt: d.rejectedAt,
-              rejectionReason: d.rejectionReason,
-              consecutiveAbsences: 0,
-            };
-          });
-        setRegistrations(regList);
-        try { localStorage.setItem('ww_registrations_cache', JSON.stringify(regList)); } catch {}
-      },
-      handleSnapshotError('Registrations')
-    );
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-    // 2. Listen to real-time approved students (Limited to 500)
-    const unsubStudents = onSnapshot(query(collection(db, 'students'), limit(500)), (snap) => {
-      const studentList: Member[] = snap.docs
+  const loadData = async (force = false) => {
+    if (isRefreshing && !force) return;
+    if (!force) {
+      try {
+        const lastFetch = Number(localStorage.getItem('ww_last_fetch_at') || '0');
+        const hasCache = registrations.length > 0 || students.length > 0;
+        if (hasCache && Date.now() - lastFetch < 2 * 60 * 1000) {
+          return;
+        }
+      } catch {}
+    }
+    setIsRefreshing(true);
+    try {
+      // 1. Fetch registrations
+      const regSnap = await getDocs(query(collection(db, 'registrations'), limit(200)));
+      const regList: Member[] = regSnap.docs
         .filter((docSnap: any) => docSnap.data()?.status !== 'deleted')
         .map((docSnap: any) => {
-        const d = docSnap.data();
-        const isPending = d.status === 'pending_approval' || d.status === 'pending';
-        return {
-          id: docSnap.id,
-          code: d.code || d.studentCode || 'WW-2026-0001',
-          fullNameAm: d.fullNameAm || d.fullNameEn || '',
-          fullNameEn: d.fullNameEn || d.fullNameAm || '',
-          christianName: d.christianName || '',
-          birthYear: d.birthYear || d.birthDate || '',
-          phone: d.phone || '',
-          gender: d.gender === 'female' ? 'female' : 'male',
-          department: d.department || 'education',
-          gradeLevel: d.gradeLevel || 'general',
-          roleAm: 'ተማሪ / Student',
-          roleEn: 'Student',
-          photoUrl: getPhotoUrl(d.photoUrl, d.gender === 'female' ? 'female' : 'male'),
-          registeredDate: d.registeredDate || new Date().toISOString().split('T')[0],
-          bloodGroup: d.bloodGroup || 'O+',
-          emergencyContact: d.emergencyContact || { 
-            name: d.emergencyName || '', 
-            phone: d.emergencyPhone || '', 
-            relation: d.emergencyRelation || 'ቤተሰብ / Family' 
-          },
-          subcity: d.subcity || d.address || '',
-          status: isPending ? 'pending_approval' : (d.status === 'rejected' ? 'rejected' : 'active'),
-          telegramId: d.telegramId || '',
-          telegramUsername: d.telegramUsername || '',
-          approvedBy: d.approvedBy,
-          approvedAt: d.approvedAt,
-          rejectedBy: d.rejectedBy,
-          rejectedAt: d.rejectedAt,
-          rejectionReason: d.rejectionReason,
-          consecutiveAbsences: d.consecutiveAbsences || 0,
-        };
-      });
-      setStudents(studentList);
-      try { localStorage.setItem('ww_students_cache', JSON.stringify(studentList)); } catch {}
-    }, handleSnapshotError('Students'));
+          const d = docSnap.data();
+          const isApproved = d.status === 'approved' || d.status === 'active';
+          const isRejected = d.status === 'rejected';
+          return {
+            id: docSnap.id,
+            code: d.studentCode || d.code || `PENDING-${d.telegramId ? String(d.telegramId).slice(-4) : docSnap.id.slice(0, 4)}`,
+            fullNameAm: d.fullNameAm || d.fullNameEn || d.nameAm || 'ያልተገለጸ ስም',
+            fullNameEn: d.fullNameEn || d.fullNameAm || d.nameEn || 'Unnamed Student',
+            phone: d.phone || '',
+            gender: d.gender === 'female' ? 'female' : 'male',
+            department: d.department || 'education',
+            gradeLevel: d.gradeLevel || 'general',
+            roleAm: 'ተማሪ / Student',
+            roleEn: 'Student',
+            christianName: d.christianName || '',
+            birthYear: d.birthYear || d.birthDate || '',
+            photoUrl: getPhotoUrl(d.photoUrl, d.gender === 'female' ? 'female' : 'male'),
+            registeredDate: d.submittedAt?.split('T')[0] || new Date().toISOString().split('T')[0],
+            bloodGroup: d.bloodGroup || 'O+',
+            emergencyContact: d.emergencyContact || { 
+              name: d.emergencyName || '', 
+              phone: d.emergencyPhone || '', 
+              relation: d.emergencyRelation || 'ቤተሰብ / Family' 
+            },
+            subcity: d.subcity || d.address || '',
+            status: isApproved ? 'active' : (isRejected ? 'rejected' : 'pending_approval'),
+            telegramId: d.telegramId || '',
+            telegramUsername: d.telegramUsername || '',
+            approvedBy: d.approvedBy,
+            approvedAt: d.approvedAt,
+            rejectedBy: d.rejectedBy,
+            rejectedAt: d.rejectedAt,
+            rejectionReason: d.rejectionReason,
+            consecutiveAbsences: 0,
+          };
+        });
+      setRegistrations(regList);
+      localStorage.setItem('ww_registrations_cache', JSON.stringify(regList));
 
-    // 3. Listen to real-time support tickets (Recent 50)
-    const unsubTickets = onSnapshot(query(collection(db, 'support_tickets'), limit(50)), (snap) => {
-      const ticketList: SupportTicket[] = snap.docs.map((docSnap: any) => {
+      // 2. Fetch students
+      const studSnap = await getDocs(query(collection(db, 'students'), limit(500)));
+      const studentList: Member[] = studSnap.docs
+        .filter((docSnap: any) => docSnap.data()?.status !== 'deleted')
+        .map((docSnap: any) => {
+          const d = docSnap.data();
+          const isPending = d.status === 'pending_approval' || d.status === 'pending';
+          return {
+            id: docSnap.id,
+            code: d.code || d.studentCode || 'WW-2026-0001',
+            fullNameAm: d.fullNameAm || d.fullNameEn || '',
+            fullNameEn: d.fullNameEn || d.fullNameAm || '',
+            christianName: d.christianName || '',
+            birthYear: d.birthYear || d.birthDate || '',
+            phone: d.phone || '',
+            gender: d.gender === 'female' ? 'female' : 'male',
+            department: d.department || 'education',
+            gradeLevel: d.gradeLevel || 'general',
+            roleAm: 'ተማሪ / Student',
+            roleEn: 'Student',
+            photoUrl: getPhotoUrl(d.photoUrl, d.gender === 'female' ? 'female' : 'male'),
+            registeredDate: d.registeredDate || new Date().toISOString().split('T')[0],
+            bloodGroup: d.bloodGroup || 'O+',
+            emergencyContact: d.emergencyContact || { 
+              name: d.emergencyName || '', 
+              phone: d.emergencyPhone || '', 
+              relation: d.emergencyRelation || 'ቤተሰብ / Family' 
+            },
+            subcity: d.subcity || d.address || '',
+            status: isPending ? 'pending_approval' : (d.status === 'rejected' ? 'rejected' : 'active'),
+            telegramId: d.telegramId || '',
+            telegramUsername: d.telegramUsername || '',
+            approvedBy: d.approvedBy,
+            approvedAt: d.approvedAt,
+            rejectedBy: d.rejectedBy,
+            rejectedAt: d.rejectedAt,
+            rejectionReason: d.rejectionReason,
+            consecutiveAbsences: d.consecutiveAbsences || 0,
+          };
+        });
+      setStudents(studentList);
+      localStorage.setItem('ww_students_cache', JSON.stringify(studentList));
+
+      // 3. Fetch tickets
+      const ticketSnap = await getDocs(query(collection(db, 'support_tickets'), limit(50)));
+      const ticketList: SupportTicket[] = ticketSnap.docs.map((docSnap: any) => {
         const d = docSnap.data();
         return {
           id: docSnap.id,
@@ -229,41 +239,35 @@ export default function App() {
         };
       });
       setTickets(ticketList);
-      try { localStorage.setItem('ww_tickets_cache', JSON.stringify(ticketList)); } catch {}
-    }, handleSnapshotError('Support tickets'));
+      localStorage.setItem('ww_tickets_cache', JSON.stringify(ticketList));
 
-    // 4. Listen to real-time attendance logs (Only last 7 days to save quota)
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const dateStr = sevenDaysAgo.toISOString().split('T')[0];
+      // 4. Fetch attendance (Last 7 days)
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const dateStr = sevenDaysAgo.toISOString().split('T')[0];
+      const attSnap = await getDocs(query(collection(db, 'attendance'), where('date', '>=', dateStr), limit(300)));
+      const attList: AttendanceRecord[] = attSnap.docs.map((docSnap: any) => {
+        const d = docSnap.data();
+        return {
+          id: docSnap.id,
+          memberId: d.memberId || d.studentId || '',
+          memberNameAm: d.memberNameAm || d.fullNameAm || 'Student',
+          memberNameEn: d.memberNameEn || d.fullNameEn || 'Student',
+          memberCode: d.memberCode || d.studentCode || '',
+          department: d.department || d.departmentResponsible || 'education',
+          sessionName: d.sessionName || 'Sunday School Session',
+          timestamp: d.timestamp || '',
+          date: d.date || '',
+          method: d.method || 'qr',
+          status: d.status || 'present',
+        };
+      });
+      setAttendance(attList);
+      localStorage.setItem('ww_attendance_cache', JSON.stringify(attList));
 
-    const unsubAttendance = onSnapshot(
-      query(collection(db, 'attendance'), where('date', '>=', dateStr), limit(300)), 
-      (snap) => {
-        const attList: AttendanceRecord[] = snap.docs.map((docSnap: any) => {
-          const d = docSnap.data();
-          return {
-            id: docSnap.id,
-            memberId: d.memberId || d.studentId || '',
-            memberNameAm: d.memberNameAm || d.fullNameAm || 'Student',
-            memberNameEn: d.memberNameEn || d.fullNameEn || 'Student',
-            memberCode: d.memberCode || d.studentCode || '',
-            department: d.department || d.departmentResponsible || 'education',
-            sessionName: d.sessionName || 'Sunday School Session',
-            timestamp: d.timestamp || '',
-            date: d.date || '',
-            method: d.method || 'qr',
-            status: d.status || 'present',
-          };
-        });
-        setAttendance(attList);
-        try { localStorage.setItem('ww_attendance_cache', JSON.stringify(attList)); } catch {}
-      }, handleSnapshotError('Attendance')
-    );
-
-    // 5. Listen to real-time leave requests (Pending 50)
-    const unsubLeaves = onSnapshot(query(collection(db, 'leave_requests'), limit(50)), (snap) => {
-      const list: LeaveRequest[] = snap.docs.map((docSnap: any) => {
+      // 5. Fetch leave requests
+      const leaveSnap = await getDocs(query(collection(db, 'leave_requests'), limit(50)));
+      const leaveList: LeaveRequest[] = leaveSnap.docs.map((docSnap: any) => {
         const d = docSnap.data();
         return {
           id: docSnap.id,
@@ -277,52 +281,40 @@ export default function App() {
           createdAt: d.submittedAt || new Date().toISOString(),
         };
       });
-      setLeaveRequests(list);
-      try { localStorage.setItem('ww_leave_cache', JSON.stringify(list)); } catch {}
-    }, handleSnapshotError('Leave requests'));
-
-    // 6. Real-time push notification receiver (capped to 20 most recent)
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission().catch(() => {});
-    }
-
-    const unsubNotifs = onSnapshot(query(collection(db, 'notifications'), limit(20)), (snap) => {
-      snap.docChanges().forEach((change: any) => {
-        if (change.type === 'added') {
-          const data = change.doc.data();
+      setLeaveRequests(leaveList);
+      localStorage.setItem('ww_leave_cache', JSON.stringify(leaveList));
+      
+      // 6. Check recent notifications once (avoids persistent onSnapshot quota burn)
+      try {
+        const notifSnap = await getDocs(query(collection(db, 'notifications'), limit(5)));
+        notifSnap.docs.forEach((docSnap: any) => {
+          const data = docSnap.data();
           const diffMs = Math.abs(Date.now() - new Date(data.createdAt || Date.now()).getTime());
-          // Alert if recent within 5 minutes
-          if (diffMs < 5 * 60 * 1000) {
+          if (diffMs < 2 * 60 * 1000) {
             if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-              if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-                navigator.serviceWorker.ready.then((reg) => {
-                  reg.showNotification(data.title || 'ወልደ ዋሕድ ሰንበት ት/ቤት', {
-                    body: data.message,
-                    icon: '/assets/aistudio/photo_2026-10-22_10-46-07__2__5dd80c37.jpg',
-                    badge: '/assets/aistudio/photo_2026-10-22_10-46-07__2__5dd80c37.jpg',
-                  });
-                });
-              } else {
-                new Notification(data.title || 'ወልደ ዋሕድ ሰንበት ት/ቤት', {
-                  body: data.message,
-                  icon: '/assets/aistudio/photo_2026-10-22_10-46-07__2__5dd80c37.jpg',
-                });
-              }
+              new Notification(data.title || 'ወልደ ዋሕድ ሰንበት ት/ቤት', {
+                body: data.message,
+                icon: '/assets/aistudio/photo_2026-10-22_10-46-07__2__5dd80c37.jpg',
+              });
             }
           }
-        }
-      });
-    }, handleSnapshotError('Notifications'));
+        });
+      } catch {}
 
-    return () => {
-      unsubReg();
-      unsubStudents();
-      unsubTickets();
-      unsubAttendance();
-      unsubLeaves();
-      unsubNotifs();
-    };
-  }, []);
+      try {
+        localStorage.setItem('ww_last_fetch_at', String(Date.now()));
+      } catch {}
+    } catch (error: any) {
+      handleSnapshotError('Data Load')(error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isLoggedIn && !showStudentPortal) return;
+    loadData();
+  }, [isLoggedIn, showStudentPortal]);
 
   // Security Protection: Disable right-click & inspect unless Super Admin
   useEffect(() => {
@@ -419,11 +411,13 @@ export default function App() {
     }
   }, [isLoggedIn, activeTab, allowedNavTabs]);
 
-  // Real-time synchronization of logged-in admin permissions from Firestore
+  // Load logged-in admin permissions from Firestore once on login
   useEffect(() => {
     if (!isLoggedIn || !currentAdmin.id) return;
-    const unsub = onSnapshot(doc(db, 'admins', currentAdmin.id), (snap) => {
-      if (snap.exists()) {
+    let active = true;
+    getDoc(doc(db, 'admins', currentAdmin.id))
+      .then((snap) => {
+        if (!active || !snap.exists()) return;
         const d = snap.data();
         if (d.status === 'suspended') {
           setIsLoggedIn(false);
@@ -437,9 +431,11 @@ export default function App() {
             customRoleTitle: d.customRoleTitle || prev.customRoleTitle,
           }));
         }
-      }
-    }, handleSnapshotError('Admin session'));
-    return () => unsub();
+      })
+      .catch(handleSnapshotError('Admin session'));
+    return () => {
+      active = false;
+    };
   }, [isLoggedIn, currentAdmin.id]);
   const handleAddMember = async (newMember: Member) => {
     try {
@@ -1118,6 +1114,20 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2">
+            <button
+              onClick={() => loadData(true)}
+              disabled={isRefreshing}
+              className={`p-2.5 sm:p-3 rounded-2xl transition-all shadow-sm hover:scale-105 active:scale-95 cursor-pointer ${
+                isRefreshing 
+                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' 
+                  : 'bg-emerald-900/40 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-800/60'
+              }`}
+              title="Refresh Data"
+            >
+              <div className={isRefreshing ? 'animate-spin' : ''}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+              </div>
+            </button>
             <button
               onClick={() => setIsChangePasswordModalOpen(true)}
               className="p-2.5 sm:p-3 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition-all shadow-sm hover:scale-105 active:scale-95 cursor-pointer"

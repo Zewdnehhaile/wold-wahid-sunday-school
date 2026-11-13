@@ -237,7 +237,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               <TrendingUp className="w-4 h-4 text-emerald-400" />
             </h3>
             <p className="text-xs text-slate-400 mb-6">
-              ከዳታቤዝ በቀጥታ የተገኘ የዕለታት የመገኘት ምጣኔ (Live Firestore Records)
+              የዕለታት የመገኘት ምጣኔ (Live Attendance Records)
             </p>
 
             {/* Real attendance by date */}

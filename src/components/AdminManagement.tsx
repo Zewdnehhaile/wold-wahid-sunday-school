@@ -80,55 +80,53 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
   const [permAnalytics, setPermAnalytics] = useState(false);
   const [permBroadcast, setPermBroadcast] = useState(false);
 
-  // Real-time Firestore synchronization for administrators from live database
+  const loadAdmins = async () => {
+    try {
+      const snap = await getDocs(query(collection(db, 'admins'), limit(50)));
+      const loaded: DetailedAdmin[] = snap.docs.map((docSnap: any) => {
+        const d = docSnap.data();
+        const p = d.permissions || {};
+        const isSuper = d.role === 'super_admin';
+
+        const resolvedPerms: AdminPermission = {
+          canAccessSchedule: isSuper ? true : Boolean(p.canAccessSchedule),
+          canAccessMembers: isSuper ? true : Boolean(p.canAccessMembers ?? p.approveStudents),
+          canAccessAttendance: isSuper ? true : Boolean(p.canAccessAttendance ?? p.takeAttendance),
+          canAccessSupport: isSuper ? true : Boolean(p.canAccessSupport ?? p.manageSupport),
+          canAccessAdmins: isSuper ? true : Boolean(p.canAccessAdmins),
+          canAccessAnalytics: isSuper ? true : Boolean(p.canAccessAnalytics ?? p.exportReports),
+          canBroadcast: isSuper ? true : Boolean(p.canBroadcast),
+          takeAttendance: isSuper ? true : Boolean(p.canAccessAttendance ?? p.takeAttendance),
+          approveStudents: isSuper ? true : Boolean(p.canAccessMembers ?? p.approveStudents),
+          manageSupport: isSuper ? true : Boolean(p.canAccessSupport ?? p.manageSupport),
+          exportReports: isSuper ? true : Boolean(p.canAccessAnalytics ?? p.exportReports),
+        };
+
+        return {
+          id: docSnap.id,
+          nameAm: d.nameAm || '',
+          nameEn: d.nameEn || d.nameAm || '',
+          role: (d.role === 'super_admin' ? 'super_admin' : 'admin') as UserRole,
+          department: (d.department || 'education') as SundaySchoolDepartment,
+          phone: d.phone || '',
+          telegramId: d.telegramId || '',
+          customRoleTitle: d.customRoleTitle || '',
+          password: d.password || '',
+          status: (d.status === 'suspended' ? 'suspended' : 'active') as 'active' | 'suspended',
+          avatarUrl: d.avatarUrl || AVATAR_MALE,
+          permissions: resolvedPerms,
+        };
+      });
+
+      setAdminsList(loaded);
+      localStorage.setItem('ww_custom_admins', JSON.stringify(loaded));
+    } catch (error) {
+      console.error('Firestore admins load error:', error);
+    }
+  };
+
   useEffect(() => {
-    const unsub = onSnapshot(
-      query(collection(db, 'admins'), limit(50)),
-      (snap) => {
-        const loaded: DetailedAdmin[] = snap.docs.map((docSnap: any) => {
-          const d = docSnap.data();
-          const p = d.permissions || {};
-          const isSuper = d.role === 'super_admin';
-
-          const resolvedPerms: AdminPermission = {
-            canAccessSchedule: isSuper ? true : Boolean(p.canAccessSchedule),
-            canAccessMembers: isSuper ? true : Boolean(p.canAccessMembers ?? p.approveStudents),
-            canAccessAttendance: isSuper ? true : Boolean(p.canAccessAttendance ?? p.takeAttendance),
-            canAccessSupport: isSuper ? true : Boolean(p.canAccessSupport ?? p.manageSupport),
-            canAccessAdmins: isSuper ? true : Boolean(p.canAccessAdmins),
-            canAccessAnalytics: isSuper ? true : Boolean(p.canAccessAnalytics ?? p.exportReports),
-            canBroadcast: isSuper ? true : Boolean(p.canBroadcast),
-            takeAttendance: isSuper ? true : Boolean(p.canAccessAttendance ?? p.takeAttendance),
-            approveStudents: isSuper ? true : Boolean(p.canAccessMembers ?? p.approveStudents),
-            manageSupport: isSuper ? true : Boolean(p.canAccessSupport ?? p.manageSupport),
-            exportReports: isSuper ? true : Boolean(p.canAccessAnalytics ?? p.exportReports),
-          };
-
-          return {
-            id: docSnap.id,
-            nameAm: d.nameAm || '',
-            nameEn: d.nameEn || d.nameAm || '',
-            role: (d.role === 'super_admin' ? 'super_admin' : 'admin') as UserRole,
-            department: (d.department || 'education') as SundaySchoolDepartment,
-            phone: d.phone || '',
-            telegramId: d.telegramId || '',
-            customRoleTitle: d.customRoleTitle || '',
-            password: d.password || '',
-            status: (d.status === 'suspended' ? 'suspended' : 'active') as 'active' | 'suspended',
-            avatarUrl: d.avatarUrl || AVATAR_MALE,
-            permissions: resolvedPerms,
-          };
-        });
-
-        setAdminsList(loaded);
-        localStorage.setItem('ww_custom_admins', JSON.stringify(loaded));
-      },
-      (error) => {
-        console.error('Firestore admins snapshot error:', error);
-      }
-    );
-
-    return () => unsub();
+    loadAdmins();
   }, []);
 
   const dict = t[lang];

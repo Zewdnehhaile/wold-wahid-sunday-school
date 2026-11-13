@@ -300,11 +300,20 @@ async function findUserRegistrationOrStudent(telegramId, username) {
     };
     // 1. Search students collection
     try {
-        const snap = await firebase_1.db.collection('students').get();
-        for (const d of snap.docs) {
-            const data = d.data();
-            if (matchesUser(data)) {
-                allCandidates.push({ type: 'student', data });
+        const snap = await firebase_1.db.collection('students')
+            .where('telegramId', '==', tgStr)
+            .limit(1)
+            .get();
+        if (!snap.empty) {
+            allCandidates.push({ type: 'student', data: { id: snap.docs[0].id, ...snap.docs[0].data() } });
+        }
+        else if (username) {
+            const userSnap = await firebase_1.db.collection('students')
+                .where('telegramUsername', '==', username)
+                .limit(1)
+                .get();
+            if (!userSnap.empty) {
+                allCandidates.push({ type: 'student', data: { id: userSnap.docs[0].id, ...userSnap.docs[0].data() } });
             }
         }
     }
@@ -313,11 +322,20 @@ async function findUserRegistrationOrStudent(telegramId, username) {
     }
     // 2. Search registrations collection
     try {
-        const snap = await firebase_1.db.collection('registrations').get();
-        for (const d of snap.docs) {
-            const data = d.data();
-            if (matchesUser(data)) {
-                allCandidates.push({ type: 'registration', data });
+        const snap = await firebase_1.db.collection('registrations')
+            .where('telegramId', '==', tgStr)
+            .limit(1)
+            .get();
+        if (!snap.empty) {
+            allCandidates.push({ type: 'registration', data: { id: snap.docs[0].id, ...snap.docs[0].data() } });
+        }
+        else if (username) {
+            const userSnap = await firebase_1.db.collection('registrations')
+                .where('telegramUsername', '==', username)
+                .limit(1)
+                .get();
+            if (!userSnap.empty) {
+                allCandidates.push({ type: 'registration', data: { id: userSnap.docs[0].id, ...userSnap.docs[0].data() } });
             }
         }
     }
@@ -355,11 +373,21 @@ async function findStudentOrRegistrationByPhone(phoneInput) {
         return p && p === digits9;
     };
     try {
-        const snap = await firebase_1.db.collection('students').get();
-        for (const d of snap.docs) {
-            const data = d.data();
-            if (matchesPhone(data)) {
-                allCandidates.push({ type: 'student', data });
+        const snap = await firebase_1.db.collection('students')
+            .where('phone', '==', phoneInput)
+            .limit(1)
+            .get();
+        if (!snap.empty) {
+            allCandidates.push({ type: 'student', data: { id: snap.docs[0].id, ...snap.docs[0].data() } });
+        }
+        else {
+            // Try fuzzy phone match if exact fails
+            const allStuds = await firebase_1.db.collection('students').get(); // Fallback for phone is harder without full text search
+            for (const d of allStuds.docs) {
+                if (matchesPhone(d.data())) {
+                    allCandidates.push({ type: 'student', data: { id: d.id, ...d.data() } });
+                    break;
+                }
             }
         }
     }
@@ -367,11 +395,20 @@ async function findStudentOrRegistrationByPhone(phoneInput) {
         console.warn('Notice searching student by phone:', e);
     }
     try {
-        const snap = await firebase_1.db.collection('registrations').get();
-        for (const d of snap.docs) {
-            const data = d.data();
-            if (matchesPhone(data)) {
-                allCandidates.push({ type: 'registration', data });
+        const snap = await firebase_1.db.collection('registrations')
+            .where('phone', '==', phoneInput)
+            .limit(1)
+            .get();
+        if (!snap.empty) {
+            allCandidates.push({ type: 'registration', data: { id: snap.docs[0].id, ...snap.docs[0].data() } });
+        }
+        else {
+            const allRegs = await firebase_1.db.collection('registrations').get();
+            for (const d of allRegs.docs) {
+                if (matchesPhone(d.data())) {
+                    allCandidates.push({ type: 'registration', data: { id: d.id, ...d.data() } });
+                    break;
+                }
             }
         }
     }
@@ -562,17 +599,21 @@ async function handleTelegramUpdateInner(update) {
                 session.data.gender = text.includes('ወንድ') || text.toLowerCase().includes('male') ? 'male' : 'female';
                 session.step = 'birthDate';
                 await setSession(telegramId, session);
-                // Generate years keyboard (Ethiopian years)
+                // Generate years keyboard (Ethiopian years) - Improved list
                 const currentEthYear = 2017;
                 const years = [];
-                for (let y = currentEthYear - 5; y >= currentEthYear - 60; y -= 4) {
+                // Recent 20 years one by one
+                for (let y = currentEthYear; y > currentEthYear - 20; y -= 4) {
                     const row = [];
                     for (let i = 0; i < 4; i++) {
-                        if (y - i >= currentEthYear - 60)
+                        if (y - i > currentEthYear - 65)
                             row.push({ text: String(y - i) });
                     }
                     years.push(row);
                 }
+                // Then some older decades
+                years.push([{ text: '1995' }, { text: '1990' }, { text: '1985' }, { text: '1980' }]);
+                years.push([{ text: '1975' }, { text: '1970' }, { text: '1965' }, { text: '1960' }]);
                 years.push([{ text: '❌ Cancel (ይቅር)' }]);
                 await dispatchSendMessage(chatId, '📅 *የትውልድ ዘመን ወይም ዕድሜ ይምረጡ ወይም ያስገቡ (Step 4/10):*\nPlease select or enter your Birth Year / Age:\n(ምሳሌ፡ 1998 ዓ.ም)', { reply_markup: { keyboard: years, resize_keyboard: true } });
             }
@@ -687,7 +728,7 @@ async function handleTelegramUpdateInner(update) {
                         `8. ተጠሪ ስልክ: ${session.data.emergencyPhone}\n` +
                         `9. ክፍል: ${session.data.department}\n` +
                         `10. ፎቶ: ተካቷል (<= 5MB)\n\n` +
-                        `⏳ *ሁኔታ:* በመጠባበቅ ላይ (Pending Review - Not in active DB until approved)\n\n` +
+                        `⏳ *ሁኔታ:* በመጠባበቅ ላይ (Pending Approval)\n\n` +
                         `አስተዳዳሪው ሲያፀድቅ የተማሪ መታወቂያዎና QR ኮድዎ ይደርስዎታል።`;
                     await dispatchSendMessage(chatId, successMsg, exports.mainMenuKeyboard);
                 }
@@ -977,13 +1018,31 @@ async function handleTelegramUpdateInner(update) {
         const studentName = student.fullNameAm || student.fullNameEn || student.nameAm || msg.from?.first_name || 'ተማሪ';
         let records = [];
         try {
-            const attSnap = await firebase_1.db.collection('attendance').get();
-            records = attSnap.docs
-                .map((d) => ({ id: d.id, ...d.data() }))
-                .filter((a) => String(a.telegramId) === String(telegramId) ||
-                String(a.telegram_id) === String(telegramId) ||
-                (studentCode && (a.memberCode === studentCode || a.member_code === studentCode || a.code === studentCode)))
-                .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+            const seenIds = new Set();
+            const rawRecords = [];
+            const byTgSnap = await firebase_1.db.collection('attendance')
+                .where('telegramId', '==', String(telegramId))
+                .limit(50)
+                .get();
+            for (const d of byTgSnap.docs) {
+                if (!seenIds.has(d.id)) {
+                    seenIds.add(d.id);
+                    rawRecords.push({ id: d.id, ...d.data() });
+                }
+            }
+            if (studentCode) {
+                const byCodeSnap = await firebase_1.db.collection('attendance')
+                    .where('memberCode', '==', studentCode)
+                    .limit(50)
+                    .get();
+                for (const d of byCodeSnap.docs) {
+                    if (!seenIds.has(d.id)) {
+                        seenIds.add(d.id);
+                        rawRecords.push({ id: d.id, ...d.data() });
+                    }
+                }
+            }
+            records = rawRecords.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
         }
         catch (e) {
             console.warn('Notice loading attendance:', e);

@@ -282,11 +282,20 @@ export async function findUserRegistrationOrStudent(telegramId: number, username
 
   // 1. Search students collection
   try {
-    const snap = await db.collection('students').get();
-    for (const d of snap.docs) {
-      const data = d.data();
-      if (matchesUser(data)) {
-        allCandidates.push({ type: 'student', data });
+    const snap = await db.collection('students')
+      .where('telegramId', '==', tgStr)
+      .limit(1)
+      .get();
+    
+    if (!snap.empty) {
+      allCandidates.push({ type: 'student', data: { id: snap.docs[0].id, ...snap.docs[0].data() } });
+    } else if (username) {
+      const userSnap = await db.collection('students')
+        .where('telegramUsername', '==', username)
+        .limit(1)
+        .get();
+      if (!userSnap.empty) {
+        allCandidates.push({ type: 'student', data: { id: userSnap.docs[0].id, ...userSnap.docs[0].data() } });
       }
     }
   } catch (e) {
@@ -295,11 +304,20 @@ export async function findUserRegistrationOrStudent(telegramId: number, username
 
   // 2. Search registrations collection
   try {
-    const snap = await db.collection('registrations').get();
-    for (const d of snap.docs) {
-      const data = d.data();
-      if (matchesUser(data)) {
-        allCandidates.push({ type: 'registration', data });
+    const snap = await db.collection('registrations')
+      .where('telegramId', '==', tgStr)
+      .limit(1)
+      .get();
+    
+    if (!snap.empty) {
+      allCandidates.push({ type: 'registration', data: { id: snap.docs[0].id, ...snap.docs[0].data() } });
+    } else if (username) {
+      const userSnap = await db.collection('registrations')
+        .where('telegramUsername', '==', username)
+        .limit(1)
+        .get();
+      if (!userSnap.empty) {
+        allCandidates.push({ type: 'registration', data: { id: userSnap.docs[0].id, ...userSnap.docs[0].data() } });
       }
     }
   } catch (e) {
@@ -340,11 +358,20 @@ export async function findStudentOrRegistrationByPhone(phoneInput: string): Prom
   };
 
   try {
-    const snap = await db.collection('students').get();
-    for (const d of snap.docs) {
-      const data = d.data();
-      if (matchesPhone(data)) {
-        allCandidates.push({ type: 'student', data });
+    const snap = await db.collection('students')
+      .where('phone', '==', phoneInput)
+      .limit(1)
+      .get();
+    if (!snap.empty) {
+      allCandidates.push({ type: 'student', data: { id: snap.docs[0].id, ...snap.docs[0].data() } });
+    } else {
+      // Try fuzzy phone match if exact fails
+      const allStuds = await db.collection('students').get(); // Fallback for phone is harder without full text search
+      for (const d of allStuds.docs) {
+        if (matchesPhone(d.data())) {
+          allCandidates.push({ type: 'student', data: { id: d.id, ...d.data() } });
+          break; 
+        }
       }
     }
   } catch (e) {
@@ -352,11 +379,19 @@ export async function findStudentOrRegistrationByPhone(phoneInput: string): Prom
   }
 
   try {
-    const snap = await db.collection('registrations').get();
-    for (const d of snap.docs) {
-      const data = d.data();
-      if (matchesPhone(data)) {
-        allCandidates.push({ type: 'registration', data });
+    const snap = await db.collection('registrations')
+      .where('phone', '==', phoneInput)
+      .limit(1)
+      .get();
+    if (!snap.empty) {
+      allCandidates.push({ type: 'registration', data: { id: snap.docs[0].id, ...snap.docs[0].data() } });
+    } else {
+      const allRegs = await db.collection('registrations').get();
+      for (const d of allRegs.docs) {
+        if (matchesPhone(d.data())) {
+          allCandidates.push({ type: 'registration', data: { id: d.id, ...d.data() } });
+          break;
+        }
       }
     }
   } catch (e) {
@@ -572,16 +607,20 @@ async function handleTelegramUpdateInner(update: any) {
         session.step = 'birthDate';
         await setSession(telegramId, session);
 
-        // Generate years keyboard (Ethiopian years)
+        // Generate years keyboard (Ethiopian years) - Improved list
         const currentEthYear = 2017;
         const years = [];
-        for (let y = currentEthYear - 5; y >= currentEthYear - 60; y -= 4) {
+        // Recent 20 years one by one
+        for (let y = currentEthYear; y > currentEthYear - 20; y -= 4) {
           const row = [];
           for (let i = 0; i < 4; i++) {
-            if (y - i >= currentEthYear - 60) row.push({ text: String(y - i) });
+            if (y - i > currentEthYear - 65) row.push({ text: String(y - i) });
           }
           years.push(row);
         }
+        // Then some older decades
+        years.push([{ text: '1995' }, { text: '1990' }, { text: '1985' }, { text: '1980' }]);
+        years.push([{ text: '1975' }, { text: '1970' }, { text: '1965' }, { text: '1960' }]);
         years.push([{ text: '❌ Cancel (ይቅር)' }]);
 
         await dispatchSendMessage(
@@ -725,7 +764,7 @@ async function handleTelegramUpdateInner(update: any) {
             `8. ተጠሪ ስልክ: ${session.data.emergencyPhone}\n` +
             `9. ክፍል: ${session.data.department}\n` +
             `10. ፎቶ: ተካቷል (<= 5MB)\n\n` +
-            `⏳ *ሁኔታ:* በመጠባበቅ ላይ (Pending Review - Not in active DB until approved)\n\n` +
+            `⏳ *ሁኔታ:* በመጠባበቅ ላይ (Pending Approval)\n\n` +
             `አስተዳዳሪው ሲያፀድቅ የተማሪ መታወቂያዎና QR ኮድዎ ይደርስዎታል።`;
 
           await dispatchSendMessage(chatId, successMsg, mainMenuKeyboard);
@@ -1090,15 +1129,36 @@ async function handleTelegramUpdateInner(update: any) {
 
     let records: any[] = [];
     try {
-      const attSnap = await db.collection('attendance').get();
-      records = attSnap.docs
-        .map((d: any) => ({ id: d.id, ...d.data() }))
-        .filter((a: any) => 
-          String(a.telegramId) === String(telegramId) || 
-          String(a.telegram_id) === String(telegramId) ||
-          (studentCode && (a.memberCode === studentCode || a.member_code === studentCode || a.code === studentCode))
-        )
-        .sort((a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+      const seenIds = new Set<string>();
+      const rawRecords: any[] = [];
+
+      const byTgSnap = await db.collection('attendance')
+        .where('telegramId', '==', String(telegramId))
+        .limit(50)
+        .get();
+      for (const d of byTgSnap.docs) {
+        if (!seenIds.has(d.id)) {
+          seenIds.add(d.id);
+          rawRecords.push({ id: d.id, ...d.data() });
+        }
+      }
+
+      if (studentCode) {
+        const byCodeSnap = await db.collection('attendance')
+          .where('memberCode', '==', studentCode)
+          .limit(50)
+          .get();
+        for (const d of byCodeSnap.docs) {
+          if (!seenIds.has(d.id)) {
+            seenIds.add(d.id);
+            rawRecords.push({ id: d.id, ...d.data() });
+          }
+        }
+      }
+
+      records = rawRecords.sort(
+        (a: any, b: any) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
+      );
     } catch (e) {
       console.warn('Notice loading attendance:', e);
     }
