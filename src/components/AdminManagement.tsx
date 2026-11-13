@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AdminUser, SundaySchoolDepartment, Language, UserRole } from '../types';
 import { t } from '../utils/translations';
 import { AVATAR_MALE } from '../data/initialData';
-import { db, collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, getDocs, query, limit } from '../firebase';
+import { db, collection, doc, setDoc, deleteDoc, updateDoc, getDocs, query, limit } from '../firebase';
 import {
   ShieldCheck,
   UserPlus,
@@ -57,7 +57,16 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
   currentAdmin,
   lang,
 }) => {
-  const [adminsList, setAdminsList] = useState<DetailedAdmin[]>(INITIAL_ADMINS as any);
+  const [adminsList, setAdminsList] = useState<DetailedAdmin[]>(() => {
+    try {
+      const cached = localStorage.getItem('ww_custom_admins');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return INITIAL_ADMINS as any;
+  });
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingAdmin, setEditingAdmin] = useState<DetailedAdmin | null>(null);
   const [actionNotice, setActionNotice] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -80,7 +89,17 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
   const [permAnalytics, setPermAnalytics] = useState(false);
   const [permBroadcast, setPermBroadcast] = useState(false);
 
-  const loadAdmins = async () => {
+  const loadAdmins = async (force = false) => {
+    if (!force) {
+      try {
+        const lastFetch = Number(localStorage.getItem('ww_admins_last_fetch_at') || '0');
+        const hasCache = Boolean(localStorage.getItem('ww_custom_admins'));
+        if (hasCache && Date.now() - lastFetch < 2 * 60 * 1000) {
+          return;
+        }
+      } catch {}
+    }
+
     try {
       const snap = await getDocs(query(collection(db, 'admins'), limit(50)));
       const loaded: DetailedAdmin[] = snap.docs.map((docSnap: any) => {
@@ -119,9 +138,20 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
       });
 
       setAdminsList(loaded);
-      localStorage.setItem('ww_custom_admins', JSON.stringify(loaded));
-    } catch (error) {
-      console.error('Firestore admins load error:', error);
+      try {
+        localStorage.setItem('ww_custom_admins', JSON.stringify(loaded));
+        localStorage.setItem('ww_admins_last_fetch_at', String(Date.now()));
+      } catch {}
+    } catch (error: any) {
+      const isQuota =
+        error?.message?.includes('Quota limit exceeded') ||
+        error?.code === 'resource-exhausted' ||
+        error?.message?.includes('quota');
+      if (isQuota) {
+        console.warn('Admins list using cached fallback.', error?.message || error);
+      } else {
+        console.error('Firestore admins load error:', error);
+      }
     }
   };
 
