@@ -4,9 +4,12 @@ import * as dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { db } from './backend/src/services/firebase.ts';
 import { getBot, handleTelegramUpdate, dispatchSendMessage } from './backend/src/services/bot.ts';
+
+const __dirname = import.meta.dirname || path.dirname(fileURLToPath(import.meta.url));
 
 dotenv.config();
 
@@ -1198,22 +1201,34 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  const portArgIdx = process.argv.indexOf('--port');
+  const cliPort =
+    portArgIdx !== -1 && process.argv[portArgIdx + 1]
+      ? parseInt(process.argv[portArgIdx + 1], 10)
+      : NaN;
+  const envPort = process.env.PORT ? parseInt(process.env.PORT, 10) : NaN;
+  const PORT = !Number.isNaN(cliPort)
+    ? cliPort
+    : process.env.NODE_ENV === 'production'
+      ? (!Number.isNaN(envPort) ? envPort : 3000)
+      : 3000;
 
-  // Keep-alive mechanism to prevent instance from idling
-  const externalUrl = process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://wold-wahid-sunday-school-app.vercel.app';
-  setInterval(async () => {
-    try {
-      const pingUrl = externalUrl ? `${externalUrl.replace(/\/$/, '')}/api/health` : `http://localhost:${PORT}/api/health`;
-      const response = await fetch(pingUrl, { headers: { 'User-Agent': 'Render-Self-Ping/1.0' } });
-      if (response.ok) {
-        console.log(`⏱️ Keep-alive ping succeeded (${response.status}) at ${new Date().toISOString()}`);
+  // Keep-alive mechanism to prevent Render instance from idling in production
+  if (process.env.NODE_ENV === 'production') {
+    const externalUrl = process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://wold-wahid-sunday-school-app.vercel.app';
+    setInterval(async () => {
+      try {
+        const pingUrl = externalUrl ? `${externalUrl.replace(/\/$/, '')}/api/health` : `http://localhost:${PORT}/api/health`;
+        const response = await fetch(pingUrl, { headers: { 'User-Agent': 'Render-Self-Ping/1.0' } });
+        if (response.ok) {
+          console.log(`⏱️ Keep-alive ping succeeded (${response.status}) at ${new Date().toISOString()}`);
+        }
+      } catch (error: any) {
+        console.warn('Keep-alive ping notice:', error?.message || error);
       }
-    } catch (error: any) {
-      console.warn('Keep-alive ping notice:', error?.message || error);
-    }
-  }, 4 * 60 * 1000); // 4 minutes (well below Render's 15 min sleep cutoff)
-  
+    }, 4 * 60 * 1000);
+  }
+
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Full-stack server running on http://0.0.0.0:${PORT}`);
   });

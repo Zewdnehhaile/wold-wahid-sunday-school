@@ -374,10 +374,8 @@ export default function App() {
   const members = [...approvedList, ...pendingList, ...rejectedList];
   const pendingCount = pendingList.length;
 
-  // Real-time counter for new messages/requests in Support & Student leave desk
+  // Counter for new support tickets (matches SupportDesk 'አዲስ' count exactly)
   const newSupportTicketsCount = tickets.filter((t) => t.status === 'new').length;
-  const pendingLeavesCount = leaveRequests.filter((l) => l.status === 'pending' || !l.status).length;
-  const totalNewSupportCount = newSupportTicketsCount + pendingLeavesCount;
 
   const dict = t[lang];
 
@@ -397,7 +395,7 @@ export default function App() {
     { id: 'schedule', label: dict.nav.schedule, mobileLabel: 'መርሐ ግብር', icon: Calendar, allowed: canSchedule },
     { id: 'members', label: dict.nav.members, mobileLabel: 'ተማሪዎች', icon: Users, count: pendingCount, allowed: canMembers },
     { id: 'attendance', label: dict.nav.attendance, mobileLabel: 'መገኘት', icon: QrCode, allowed: canAttendance },
-    { id: 'support', label: dict.nav.support, mobileLabel: 'ድጋፍ', icon: HeartHandshake, count: totalNewSupportCount, allowed: canSupport },
+    { id: 'support', label: dict.nav.support, mobileLabel: 'ድጋፍ', icon: HeartHandshake, count: newSupportTicketsCount, allowed: canSupport },
     { id: 'admins', label: dict.nav.admins, mobileLabel: 'አድሚኖች', icon: ShieldCheck, allowed: canAdmins },
     { id: 'analytics', label: dict.nav.analytics, mobileLabel: 'ሪፖርት', icon: BarChart3, allowed: canAnalytics },
   ].filter((t) => t.allowed);
@@ -749,7 +747,13 @@ export default function App() {
 
   const handleAddTicket = async (ticket: SupportTicket) => {
     try {
-      await addDoc(collection(db, 'support_tickets'), ticket);
+      const docRef = await addDoc(collection(db, 'support_tickets'), ticket);
+      const savedTicket = { ...ticket, id: docRef.id || ticket.id };
+      setTickets((prev) => {
+        const next = [savedTicket, ...prev];
+        try { localStorage.setItem('ww_tickets_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
     } catch (e) {
       console.error('Add ticket failed:', e);
     }
@@ -757,7 +761,11 @@ export default function App() {
 
   const handleUpdateTicketStatus = async (ticketId: string, status: SupportStatus, reason?: string) => {
     try {
-      setTickets((prev) => prev.map((t) => (t.id === ticketId ? { ...t, status, reason: reason || t.reason, updatedAt: new Date().toISOString() } : t)));
+      setTickets((prev) => {
+        const next = prev.map((t) => (t.id === ticketId ? { ...t, status, reason: reason || t.reason, updatedAt: new Date().toISOString() } : t));
+        try { localStorage.setItem('ww_tickets_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
       await updateDoc(doc(db, 'support_tickets', ticketId), {
         status,
         reason: reason || '',
@@ -848,7 +856,11 @@ export default function App() {
 
   const handleDeleteTicket = async (ticketId: string) => {
     try {
-      setTickets((prev) => prev.filter((t) => t.id !== ticketId && t.ticketNumber !== ticketId));
+      setTickets((prev) => {
+        const next = prev.filter((t) => t.id !== ticketId && t.ticketNumber !== ticketId);
+        try { localStorage.setItem('ww_tickets_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
       await deleteDoc(doc(db, 'support_tickets', ticketId)).catch(() => {});
       
       // Also delete from Firestore if ticket has different document ID
@@ -867,6 +879,11 @@ export default function App() {
 
   const handleDeleteLeaveRequest = async (requestId: string) => {
     try {
+      setLeaveRequests((prev) => {
+        const next = prev.filter((l) => l.id !== requestId);
+        try { localStorage.setItem('ww_leave_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
       await deleteDoc(doc(db, 'leave_requests', requestId));
     } catch (error) {
       console.error('Delete leave request failed:', error);
@@ -880,7 +897,11 @@ export default function App() {
     extraLeaveData?: any
   ) => {
     try {
-      setLeaveRequests((prev) => prev.map((l) => (l.id === requestId ? { ...l, status, reason: reason || l.reason } : l)));
+      setLeaveRequests((prev) => {
+        const next = prev.map((l) => (l.id === requestId ? { ...l, status, reason: reason || l.reason } : l));
+        try { localStorage.setItem('ww_leave_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
       await updateDoc(doc(db, 'leave_requests', requestId), {
         status,
         reason: reason,
