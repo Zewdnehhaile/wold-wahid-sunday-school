@@ -135,13 +135,6 @@ export const MobileAppSimulator: React.FC<MobileAppSimulatorProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
-          <a
-            href="https://expo.dev/artifacts/eas/0iCNMDPb0iX_dBuo2QOLip4vcoBTBUUxd9rGBggKKDE.apk"
-            download="WoldWahid.apk"
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/25 transition-colors"
-          >
-            <span>📥 Download Android APK</span>
-          </a>
           <div className="bg-slate-800/80 px-3.5 py-2 rounded-xl border border-slate-700 text-xs text-slate-300 hidden sm:block">
             <span className="text-slate-500 mr-2">Database ID:</span>
             <span className="font-mono text-amber-400 font-semibold">ai-studio-d3279648-1f3b-4293-8893-cd76f3d816dc</span>

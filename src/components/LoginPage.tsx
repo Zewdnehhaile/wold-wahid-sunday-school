@@ -6,10 +6,10 @@ import { hashPasswordWeb } from '../utils/crypto';
 
 interface LoginPageProps {
   onLogin: (adminData: { id?: string; nameAm: string; nameEn: string; phone: string; role: 'super_admin' | 'admin'; permissions?: any }) => void;
-  onOpenStudentPortal?: () => void;
+  onOpenParentPortal?: () => void;
 }
 
-export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onOpenStudentPortal }) => {
+export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onOpenParentPortal }) => {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -302,6 +302,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onOpenStudentPort
               )}
             </button>
           </form>
+
+          {onOpenParentPortal && (
+            <div className="mt-5 pt-4 border-t border-emerald-900/60 flex justify-center">
+              <button
+                type="button"
+                onClick={onOpenParentPortal}
+                className="w-full text-xs font-bold text-amber-300 hover:text-amber-200 px-3 py-2.5 rounded-xl bg-[#062414] border border-amber-500/30 cursor-pointer transition-colors"
+              >
+                👨‍👩‍👧 የወላጆች ክትትል (Parent Portal)
+              </button>
+            </div>
+          )}
         </div>
 
       </div>

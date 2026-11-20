@@ -171,3 +171,179 @@ export function formatEthiopianTime(dateInput?: Date | string): string {
   
   return `${period} ${ethHours}:${pad(minutes)}:${pad(seconds)}`;
 }
+
+export interface BahireHasabEvent {
+  id: string;
+  nameAm: string;
+  nameEn: string;
+  category: 'fast' | 'feast';
+  isMovable: boolean;
+  ethMonth: number;
+  ethMonthName: string;
+  ethDay: number;
+  ethDateFormatted: string;
+  gregorianIso: string;
+  gregorianFormatted: string;
+  noteAm: string;
+}
+
+export interface BahireHasabResult {
+  ethYear: number;
+  ameteAlem: number;
+  wengelawi: string;
+  wengelawiEn: string;
+  newYearDayName: string;
+  meteneRabit: number;
+  wenber: number;
+  abektie: number;
+  metqi: number;
+  bealeMetqiStr: string;
+  mebajaHamer: number;
+  events: BahireHasabEvent[];
+}
+
+export function ethiopianToGregorian(ethYear: number, ethMonth: number, ethDay: number): Date {
+  const gYearStart = ethYear + 7;
+  const sepDay = ethYear % 4 === 0 ? 12 : 11;
+  const d = new Date(Date.UTC(gYearStart, 8, sepDay));
+  const offset = (ethMonth - 1) * 30 + (ethDay - 1);
+  d.setUTCDate(d.getUTCDate() + offset);
+  return d;
+}
+
+function addEthDays(m: number, d: number, offset: number): { month: number; day: number } {
+  const total = (m - 1) * 30 + (d - 1) + offset;
+  return {
+    month: Math.floor(total / 30) + 1,
+    day: (total % 30) + 1,
+  };
+}
+
+function formatGregShort(d: Date): string {
+  return d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+/**
+ * Computes complete Ethiopian Orthodox Tewahedo Bahire Hasab (ባሕረ ሐሳብ)
+ * values, movable fasts/feasts, and key fixed feasts for a given Ethiopian year.
+ */
+export function computeBahireHasab(ethYear: number): BahireHasabResult {
+  const DAYS_MON_FIRST = ['ሰኞ', 'ማክሰኞ', 'ረቡዕ', 'ሐሙስ', 'አርብ', 'ቅዳሜ', 'እሁድ'];
+  const TEWSAK = [6, 5, 4, 3, 2, 8, 7]; // Mon=6, Tue=5, Wed=4, Thu=3, Fri=2, Sat=8, Sun=7
+  const WENGELAWI_AM = ['ዮሐንስ', 'ማቴዎስ', 'ማርቆስ', 'ሉቃስ'];
+  const WENGELAWI_EN = ['St. John', 'St. Matthew', 'St. Mark', 'St. Luke'];
+
+  const ameteAlem = 5500 + ethYear;
+  const meteneRabit = Math.floor(ameteAlem / 4);
+  const nyIdx = (ameteAlem + meteneRabit) % 7; // 0=Mon..6=Sun
+  const newYearDayName = DAYS_MON_FIRST[nyIdx];
+  const wengelawiIdx = ameteAlem % 4;
+
+  const wenber = (ameteAlem - 1) % 19;
+  const abektie = (wenber * 11) % 30;
+  const metqi = abektie === 0 ? 30 : 30 - abektie;
+  const metqiMonth = metqi > 14 ? 1 : 2; // 1=Meskerem, 2=Tikimt
+  const metqiWeekdayIdx = (nyIdx + (metqiMonth - 1) * 30 + (metqi - 1)) % 7;
+  const tewsak = TEWSAK[metqiWeekdayIdx];
+  const mebajaHamer = metqi + tewsak;
+
+  const neneweBaseMonth = metqiMonth === 1 ? 5 : 6; // Tir or Yekatit
+  const neneweMonth = mebajaHamer > 30 ? neneweBaseMonth + 1 : neneweBaseMonth;
+  const neneweDay = mebajaHamer > 30 ? mebajaHamer - 30 : mebajaHamer;
+
+  const makeEvent = (
+    id: string,
+    nameAm: string,
+    nameEn: string,
+    category: 'fast' | 'feast',
+    isMovable: boolean,
+    ethMonth: number,
+    ethDay: number,
+    noteAm: string
+  ): BahireHasabEvent => {
+    const gDate = ethiopianToGregorian(ethYear, ethMonth, ethDay);
+    const ethMonthName = ETHIOPIAN_MONTHS[ethMonth - 1] || '';
+    return {
+      id,
+      nameAm,
+      nameEn,
+      category,
+      isMovable,
+      ethMonth,
+      ethMonthName,
+      ethDay,
+      ethDateFormatted: `${ethMonthName} ${ethDay}`,
+      gregorianIso: gDate.toISOString().split('T')[0],
+      gregorianFormatted: formatGregShort(gDate),
+      noteAm,
+    };
+  };
+
+  const abiy = addEthDays(neneweMonth, neneweDay, 14);
+  const debreZeit = addEthDays(neneweMonth, neneweDay, 41);
+  const hosanna = addEthDays(neneweMonth, neneweDay, 62);
+  const siklet = addEthDays(neneweMonth, neneweDay, 67);
+  const tinsae = addEthDays(neneweMonth, neneweDay, 69);
+  const rikbe = addEthDays(neneweMonth, neneweDay, 93);
+  const erget = addEthDays(neneweMonth, neneweDay, 108);
+  const peraklitos = addEthDays(neneweMonth, neneweDay, 118);
+  const hawaryat = addEthDays(neneweMonth, neneweDay, 119);
+
+  // Genna (ልደት) falls on Tahsas 28 in Zemene Yohannes (year after Pagume 6 leap)
+  const gennaDay = ethYear % 4 === 0 ? 28 : 29;
+
+  const events: BahireHasabEvent[] = [
+    // Fixed & Movable combined chronologically within the Ethiopian Year
+    makeEvent('enkutatash', 'እንቁጣጣሽ (አዲስ ዓመት)', 'Ethiopian New Year', 'feast', false, 1, 1, `ዘመነ ${WENGELAWI_AM[wengelawiIdx]} (${newYearDayName})`),
+    makeEvent('meskel', 'በዓለ መስቀል', 'Feast of the Holy Cross (Meskel)', 'feast', false, 1, 17, 'የደመራ እና የመስቀል በዓል'),
+    makeEvent('tsige', 'ጾመ ጽጌ መግቢያ', 'Fast of Tsige Begins', 'fast', false, 1, 26, 'እስከ ኅዳር 5 የሚቆይ ጾም'),
+    makeEvent('nebiyat', 'ጾመ ነቢያት (የገና ጾም)', 'Nativity Fast Begins', 'fast', false, 3, 15, 'የጌታችን ልደት ጾም መግቢያ (43 ቀናት)'),
+    makeEvent('genna', 'በዓለ ልደት (ገና)', 'Nativity / Christmas (Genna)', 'feast', false, 4, gennaDay, 'የጌታችን የመድኃኒታችን የልደት በዓል'),
+    makeEvent('timket', 'በዓለ ጥምቀት', 'Epiphany (Timket)', 'feast', false, 5, 11, 'ጥር 10 ከተራ · ጥር 11 ጥምቀት'),
+    makeEvent('nenewe', 'ጾመ ነነዌ', 'Fast of Nineveh', 'fast', true, neneweMonth, neneweDay, 'የ3 ቀን ጾም (ሰኞ – ረቡዕ)'),
+    makeEvent('abiy', 'ዐቢይ ጾም መግቢያ', 'Great Lent Begins', 'fast', true, abiy.month, abiy.day, 'የ55 ቀናት ታላቁ ጾም መግቢያ'),
+    makeEvent('debrezeit', 'ደብረ ዘይት', 'Debre Zeit (Mid-Lent)', 'feast', true, debreZeit.month, debreZeit.day, 'የዐቢይ ጾም አጋማሽ እሁድ'),
+    makeEvent('hosanna', 'ሆሣዕና', 'Palm Sunday (Hosanna)', 'feast', true, hosanna.month, hosanna.day, 'የሰሙነ ሕማማት መግቢያ እሁድ'),
+    makeEvent('siklet', 'ስቅለት (ዓርብ)', 'Good Friday (Siklet)', 'fast', true, siklet.month, siklet.day, 'የጌታችን የስቅለት ቀን'),
+    makeEvent('tinsae', 'ትንሣኤ (ፋሲካ)', 'Easter (Fasika / Tinsae)', 'feast', true, tinsae.month, tinsae.day, 'የጌታችን የትንሣኤ ታላቅ በዓል'),
+    makeEvent('rikbe', 'ርክበ ካህናት', 'Rikbe Kahinat', 'feast', true, rikbe.month, rikbe.day, 'ከትንሣኤ በኋላ 24ኛው ቀን (ረቡዕ)'),
+    makeEvent('erget', 'በዓለ ዕርገት', 'Ascension (Erget)', 'feast', true, erget.month, erget.day, 'ከትንሣኤ በኋላ 40ኛው ቀን (ሐሙስ)'),
+    makeEvent('peraklitos', 'በዓለ ጰራቅሊጦስ', 'Pentecost (Peraklitos)', 'feast', true, peraklitos.month, peraklitos.day, 'ከትንሣኤ በኋላ 50ኛው ቀን (እሁድ)'),
+    makeEvent('hawaryat', 'ጾመ ሐዋርያት (ሰኔ ጾም)', 'Fast of the Apostles Begins', 'fast', true, hawaryat.month, hawaryat.day, 'እስከ ሐምሌ 5 የሚቆይ ጾም'),
+    makeEvent('filseta', 'ጾመ ፍልሰታ መግቢያ', 'Fast of Assumption (Filseta)', 'fast', false, 12, 1, 'ከነሐሴ 1 እስከ ነሐሴ 15 (15 ቀናት)'),
+    makeEvent('buhe', 'ደብረ ታቦር (ቡሄ)', 'Transfiguration (Buhe)', 'feast', false, 12, 13, 'በዓለ ደብረ ታቦር'),
+    makeEvent('kidane', 'ፍልሰታ ለማርያም', 'Assumption of St. Mary', 'feast', false, 12, 16, 'የእመቤታችን ዕርገት በዓል'),
+  ];
+
+  return {
+    ethYear,
+    ameteAlem,
+    wengelawi: WENGELAWI_AM[wengelawiIdx],
+    wengelawiEn: WENGELAWI_EN[wengelawiIdx],
+    newYearDayName,
+    meteneRabit,
+    wenber,
+    abektie,
+    metqi,
+    bealeMetqiStr: `${ETHIOPIAN_MONTHS[metqiMonth - 1]} ${metqi}`,
+    mebajaHamer: mebajaHamer > 30 ? mebajaHamer - 30 : mebajaHamer,
+    events,
+  };
+}
+
+export function getUpcomingBahireHasabEvents(fromDate: Date = new Date(), count = 3): BahireHasabEvent[] {
+  const todayIso = fromDate.toISOString().split('T')[0];
+  const currentEth = toEthiopianDate(fromDate);
+  const currentYearData = computeBahireHasab(currentEth.year);
+  const nextYearData = computeBahireHasab(currentEth.year + 1);
+  const combined = [...currentYearData.events, ...nextYearData.events]
+    .filter((ev) => ev.gregorianIso >= todayIso)
+    .sort((a, b) => a.gregorianIso.localeCompare(b.gregorianIso));
+  return combined.slice(0, count);
+}
+

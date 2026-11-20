@@ -20,8 +20,11 @@ import {
   UserX,
   KeyRound,
   Megaphone,
+  History,
 } from 'lucide-react';
 import { ChangePasswordModal } from './ChangePasswordModal';
+import { AuditLogView } from './AuditLogView';
+import { recordAuditLog } from '../utils/auditLog';
 
 import { INITIAL_ADMINS } from '../data/initialData';
 
@@ -30,6 +33,7 @@ export interface AdminPermission {
   canAccessMembers: boolean;
   canAccessAttendance: boolean;
   canAccessSupport: boolean;
+  canAccessParents?: boolean;
   canAccessAdmins: boolean;
   canAccessAnalytics: boolean;
   canBroadcast?: boolean;
@@ -72,6 +76,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
   const [actionNotice, setActionNotice] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [selectedAdminForPassword, setSelectedAdminForPassword] = useState<DetailedAdmin | null>(null);
+  const [activeSection, setActiveSection] = useState<'admins' | 'audit'>('admins');
 
   // New admin form state
   const [newAdminName, setNewAdminName] = useState('');
@@ -85,6 +90,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
   const [permMembers, setPermMembers] = useState(false);
   const [permAttendance, setPermAttendance] = useState(true);
   const [permSupport, setPermSupport] = useState(false);
+  const [permParents, setPermParents] = useState(false);
   const [permAdmins, setPermAdmins] = useState(false);
   const [permAnalytics, setPermAnalytics] = useState(false);
   const [permBroadcast, setPermBroadcast] = useState(false);
@@ -94,7 +100,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
       try {
         const lastFetch = Number(localStorage.getItem('ww_admins_last_fetch_at') || '0');
         const hasCache = Boolean(localStorage.getItem('ww_custom_admins'));
-        if (hasCache && Date.now() - lastFetch < 2 * 60 * 1000) {
+        if (hasCache && Date.now() - lastFetch < 15 * 60 * 1000) {
           return;
         }
       } catch {}
@@ -112,6 +118,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
           canAccessMembers: isSuper ? true : Boolean(p.canAccessMembers ?? p.approveStudents),
           canAccessAttendance: isSuper ? true : Boolean(p.canAccessAttendance ?? p.takeAttendance),
           canAccessSupport: isSuper ? true : Boolean(p.canAccessSupport ?? p.manageSupport),
+          canAccessParents: isSuper ? true : Boolean(p.canAccessParents ?? p.canAccessMembers ?? p.approveStudents),
           canAccessAdmins: isSuper ? true : Boolean(p.canAccessAdmins),
           canAccessAnalytics: isSuper ? true : Boolean(p.canAccessAnalytics ?? p.exportReports),
           canBroadcast: isSuper ? true : Boolean(p.canBroadcast),
@@ -195,6 +202,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
         canAccessMembers: assignedRole === 'super_admin' ? true : permMembers,
         canAccessAttendance: assignedRole === 'super_admin' ? true : permAttendance,
         canAccessSupport: assignedRole === 'super_admin' ? true : permSupport,
+        canAccessParents: assignedRole === 'super_admin' ? true : permParents,
         canAccessAdmins: assignedRole === 'super_admin' ? true : permAdmins,
         canAccessAnalytics: assignedRole === 'super_admin' ? true : permAnalytics,
         canBroadcast: assignedRole === 'super_admin' ? true : permBroadcast,
@@ -226,6 +234,17 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
       setTimeout(() => setActionNotice(null), 5000);
       setIsAddModalOpen(false);
 
+      recordAuditLog({
+        actorId: currentAdmin.id || 'admin',
+        actorName: currentAdmin.nameAm,
+        actorRole: currentAdmin.role,
+        targetType: 'admin',
+        targetName: newAdmin.nameAm,
+        action: 'create_admin',
+        summaryAm: `አዲስ አስተዳዳሪ "${newAdmin.nameAm}" (${assignedRole === 'super_admin' ? 'ዋና' : 'አስተዳዳሪ'}) መዝግቧል`,
+        summaryEn: `Created admin account for ${newAdmin.nameAm} (${assignedRole})`,
+      });
+
       // Reset form
       setNewAdminName('');
       setNewAdminPhone('');
@@ -237,6 +256,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
       setPermMembers(false);
       setPermAttendance(true);
       setPermSupport(false);
+      setPermParents(false);
       setPermAdmins(false);
       setPermAnalytics(false);
       setPermBroadcast(false);
@@ -270,9 +290,22 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
 
       await setDoc(doc(db, 'admins', editingAdmin.id), updatedToSave, { merge: true });
 
-      setAdminsList((prev) =>
-        prev.map((adm) => (adm.id === editingAdmin.id ? updatedToSave : adm))
-      );
+      setAdminsList((prev) => {
+        const next = prev.map((adm) => (adm.id === editingAdmin.id ? updatedToSave : adm));
+        try { localStorage.setItem('ww_custom_admins', JSON.stringify(next)); } catch {}
+        return next;
+      });
+
+      recordAuditLog({
+        actorId: currentAdmin.id || 'admin',
+        actorName: currentAdmin.nameAm,
+        actorRole: currentAdmin.role,
+        targetType: 'admin',
+        targetName: editingAdmin.nameAm,
+        action: 'update_admin',
+        summaryAm: `የአስተዳዳሪ "${editingAdmin.nameAm}" መረጃና ፈቃድ አስተካክሏል`,
+        summaryEn: `Updated admin profile & permissions for ${editingAdmin.nameAm}`,
+      });
 
       setActionNotice({
         message: `የ"${editingAdmin.nameAm}" መረጃና ፈቃዶች በተሳካ ሁኔታ ተስተካክሏል!`,
@@ -299,6 +332,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
       canAccessMembers: Boolean(target.permissions?.canAccessMembers ?? target.permissions?.approveStudents),
       canAccessAttendance: Boolean(target.permissions?.canAccessAttendance ?? target.permissions?.takeAttendance),
       canAccessSupport: Boolean(target.permissions?.canAccessSupport ?? target.permissions?.manageSupport),
+      canAccessParents: Boolean(target.permissions?.canAccessParents ?? target.permissions?.canAccessMembers ?? target.permissions?.approveStudents),
       canAccessAdmins: Boolean(target.permissions?.canAccessAdmins),
       canAccessAnalytics: Boolean(target.permissions?.canAccessAnalytics ?? target.permissions?.exportReports),
       canBroadcast: Boolean(target.permissions?.canBroadcast),
@@ -314,12 +348,24 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
     newPerms.manageSupport = newPerms.canAccessSupport;
     newPerms.exportReports = newPerms.canAccessAnalytics;
 
-    setAdminsList((prev) =>
-      prev.map((a) => (a.id === adminId ? { ...a, permissions: newPerms } : a))
-    );
+    setAdminsList((prev) => {
+      const next = prev.map((a) => (a.id === adminId ? { ...a, permissions: newPerms } : a));
+      try { localStorage.setItem('ww_custom_admins', JSON.stringify(next)); } catch {}
+      return next;
+    });
 
     try {
       await setDoc(doc(db, 'admins', adminId), { permissions: newPerms }, { merge: true });
+      recordAuditLog({
+        actorId: currentAdmin.id || 'admin',
+        actorName: currentAdmin.nameAm,
+        actorRole: currentAdmin.role,
+        targetType: 'admin',
+        targetName: target.nameAm,
+        action: 'toggle_permission',
+        summaryAm: `የ"${target.nameAm}" ፈቃድ (${String(permKey)}) ቀይሯል`,
+        summaryEn: `Toggled permission ${String(permKey)} for ${target.nameAm}`,
+      });
     } catch (err) {
       console.error('Failed to toggle permission:', err);
     }
@@ -329,13 +375,25 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
     const target = adminsList.find((a) => a.id === adminId);
     if (!target || target.role === 'super_admin') return;
 
-    const nextStatus = target.status === 'suspended' ? 'active' : 'suspended';
-    setAdminsList((prev) =>
-      prev.map((a) => (a.id === adminId ? { ...a, status: nextStatus } : a))
-    );
+    const nextStatus: 'active' | 'suspended' = target.status === 'suspended' ? 'active' : 'suspended';
+    setAdminsList((prev) => {
+      const next = prev.map((a) => (a.id === adminId ? { ...a, status: nextStatus } : a));
+      try { localStorage.setItem('ww_custom_admins', JSON.stringify(next)); } catch {}
+      return next;
+    });
 
     try {
       await updateDoc(doc(db, 'admins', adminId), { status: nextStatus });
+      recordAuditLog({
+        actorId: currentAdmin.id || 'admin',
+        actorName: currentAdmin.nameAm,
+        actorRole: currentAdmin.role,
+        targetType: 'admin',
+        targetName: target.nameAm,
+        action: 'toggle_status',
+        summaryAm: `የ"${target.nameAm}" ሁኔታ ወደ ${nextStatus === 'suspended' ? 'ታግዷል' : 'ንቁ'} ቀይሯል`,
+        summaryEn: `Changed admin ${target.nameAm} status to ${nextStatus}`,
+      });
     } catch (err) {
       console.error('Failed to toggle status:', err);
     }
@@ -346,9 +404,23 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
     if (!target) return;
 
     if (confirm(`"${target.nameAm}" የተባሉትን አገልጋይ ከሲስተሙ ሙሉ በሙሉ መሰረዝ ይፈልጋሉ?`)) {
-      setAdminsList((prev) => prev.filter((a) => a.id !== adminId));
+      setAdminsList((prev) => {
+        const next = prev.filter((a) => a.id !== adminId);
+        try { localStorage.setItem('ww_custom_admins', JSON.stringify(next)); } catch {}
+        return next;
+      });
       try {
         await deleteDoc(doc(db, 'admins', adminId));
+        recordAuditLog({
+          actorId: currentAdmin.id || 'admin',
+          actorName: currentAdmin.nameAm,
+          actorRole: currentAdmin.role,
+          targetType: 'admin',
+          targetName: target.nameAm,
+          action: 'delete_admin',
+          summaryAm: `አስተዳዳሪ "${target.nameAm}"ን ከሲስተሙ ሰርዟል`,
+          summaryEn: `Deleted admin ${target.nameAm}`,
+        });
         setActionNotice({
           message: `አስተዳዳሪው ከሲስተሙ ተሰርዟል።`,
           type: 'success',
@@ -407,6 +479,42 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
         </div>
       </div>
 
+      {/* Section Switcher: Admins List vs Role-Scoped Audit Log */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#0f4425] pb-3">
+        <button
+          type="button"
+          onClick={() => setActiveSection('admins')}
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            activeSection === 'admins'
+              ? 'bg-amber-500 text-slate-950 shadow-md'
+              : 'bg-[#09351c] text-emerald-200/80 border border-[#0f4425] hover:text-white'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span>{lang === 'am' ? `አስተዳዳሪዎች (${visibleAdmins.length})` : `Admins (${visibleAdmins.length})`}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveSection('audit')}
+          className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+            activeSection === 'audit'
+              ? 'bg-amber-500 text-slate-950 shadow-md'
+              : 'bg-[#09351c] text-emerald-200/80 border border-[#0f4425] hover:text-white'
+          }`}
+        >
+          <History className="w-4 h-4" />
+          <span>
+            {isSuperAdmin
+              ? lang === 'am'
+                ? 'የሲስተም እንቅስቃሴ (Audit Log)'
+                : 'Full Audit Log'
+              : lang === 'am'
+              ? 'የተማሪ እንቅስቃሴ ታሪክ (Student Activity)'
+              : 'Student Activity Log'}
+          </span>
+        </button>
+      </div>
+
       {/* Action Notice */}
       {actionNotice && (
         <div
@@ -429,7 +537,10 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
         </div>
       )}
 
-      {/* Admins Table */}
+      {activeSection === 'audit' ? (
+        <AuditLogView role={currentAdmin.role} lang={lang} />
+      ) : (
+      /* Admins Table */
       <div className="bg-[#09351c]/90 backdrop-blur-md border border-[#0f4425] rounded-3xl shadow-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
@@ -442,6 +553,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                 <th className="py-3 px-3 text-center">ተማሪዎች</th>
                 <th className="py-3 px-3 text-center">QR ክትትል</th>
                 <th className="py-3 px-3 text-center">ድጋፍ</th>
+                <th className="py-3 px-3 text-center">ወላጆች</th>
                 <th className="py-3 px-3 text-center">አድሚኖች</th>
                 <th className="py-3 px-3 text-center">ሪፖርት</th>
                 <th className="py-3 px-3 text-center">ማስታወቂያ</th>
@@ -590,6 +702,21 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                     <td className="py-3 px-4 text-center">
                       <button
                         disabled={isSuper}
+                        onClick={() => handleTogglePermission(adm.id, 'canAccessParents')}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          adm.permissions?.canAccessParents
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-[#062414] text-slate-500 border border-[#0f4425]'
+                        } ${isSuper ? 'opacity-80 cursor-default' : 'hover:scale-105 cursor-pointer'}`}
+                        title="የወላጆች ማጽደቂያ ፈቃድ"
+                      >
+                        {adm.permissions?.canAccessParents ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                      </button>
+                    </td>
+
+                    <td className="py-3 px-4 text-center">
+                      <button
+                        disabled={isSuper}
                         onClick={() => handleTogglePermission(adm.id, 'canAccessAdmins')}
                         className={`p-1.5 rounded-lg transition-colors ${
                           adm.permissions?.canAccessAdmins
@@ -685,7 +812,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
               })}
               {visibleAdmins.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="py-12 text-center text-slate-400">
+                  <td colSpan={11} className="py-12 text-center text-slate-400">
                     <p className="text-sm font-semibold">ምንም የተመዘገበ አድሚን አልተገኘም።</p>
                     <p className="text-xs text-slate-500 mt-1">አዲስ አድሚን ለመመዝገብ ከላይ "አዲስ አስተዳዳሪ ጨምር" የሚለውን ይጫኑ።</p>
                   </td>
@@ -695,6 +822,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
           </table>
         </div>
       </div>
+      )}
 
       {/* Add New Admin Modal */}
       {isAddModalOpen && (
@@ -880,6 +1008,16 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                       className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
                     />
                     <span>ድጋፍና ፈቃድ</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={permParents}
+                      onChange={(e) => setPermParents(e.target.checked)}
+                      className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
+                    />
+                    <span>ወላጆች ማጽደቂያ</span>
                   </label>
 
                   <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
@@ -1087,6 +1225,19 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                       className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
                     />
                     <span>ድጋፍና ፈቃድ</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editingAdmin.permissions?.canAccessParents ?? (editingAdmin.permissions?.canAccessMembers ?? false)}
+                      onChange={(e) => setEditingAdmin({
+                        ...editingAdmin,
+                        permissions: { ...(editingAdmin.permissions || {}), canAccessParents: e.target.checked } as any
+                      })}
+                      className="rounded text-amber-500 bg-[#09351c] border-[#0f4425]"
+                    />
+                    <span>ወላጆች ማጽደቂያ</span>
                   </label>
 
                   <label className="flex items-center gap-2 text-slate-200 cursor-pointer">

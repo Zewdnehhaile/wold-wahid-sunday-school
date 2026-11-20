@@ -1,4 +1,4 @@
-import { db, collection, getDocs, addDoc } from '../firebase';
+import { db, collection, getDocs, addDoc, query, limit } from '../firebase';
 
 export const TELEGRAM_BOT_TOKEN =
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_TELEGRAM_BOT_TOKEN) ||
@@ -34,7 +34,6 @@ export async function sendTelegramMessage(
   const endpoint = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
 
   try {
-    // 1. Try sending with requested parse mode
     const payload: any = {
       chat_id: cleanChatId,
       text: text,
@@ -55,9 +54,7 @@ export async function sendTelegramMessage(
       return { ok: true, chatId: cleanChatId, messageId: data.result?.message_id };
     }
 
-    // 2. If Markdown formatting error (status 400), retry as clean plain text
     if (options?.parseMode && data.description && data.description.includes("can't parse entities")) {
-      console.warn(`Telegram markdown parse error for ${cleanChatId}. Retrying as plain text...`);
       const fallbackResponse = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -75,88 +72,112 @@ export async function sendTelegramMessage(
 
     return { ok: false, chatId: cleanChatId, error: data.description || 'Unknown Telegram error' };
   } catch (err: any) {
-    console.error(`Telegram API network error for chat ${cleanChatId}:`, err);
     return { ok: false, chatId: cleanChatId, error: err?.message || 'Network error' };
   }
 }
 
+function extractCleanTgId(val: any): string | null {
+  if (!val) return null;
+  const str = String(val).replace(/\D/g, '').trim();
+  return str.length >= 6 ? str : null;
+}
+
 /**
- * Collect all active unique Telegram Chat IDs from Firestore.
+ * Collect unique Telegram Chat IDs using cached subscribers + optional limit(200) fallback.
  */
-export async function collectAllTelegramIds(): Promise<string[]> {
+export async function collectAllTelegramIds(knownMembers?: Array<{ telegramId?: string | number }>): Promise<string[]> {
   const idSet = new Set<string>();
 
-  const extractId = (val: any) => {
-    if (!val) return;
-    const str = String(val).replace(/\D/g, '').trim();
-    if (str.length >= 6) {
-      idSet.add(str);
+  if (knownMembers && knownMembers.length > 0) {
+    knownMembers.forEach((m) => {
+      const id = extractCleanTgId(m.telegramId);
+      if (id) idSet.add(id);
+    });
+  }
+
+  // Use 30-minute cached bot_subscribers to keep Firestore reads low
+  try {
+    const cachedRaw = localStorage.getItem('ww_tg_subs_cache');
+    const lastAt = Number(localStorage.getItem('ww_tg_subs_fetch_at') || '0');
+    if (cachedRaw && Date.now() - lastAt < 30 * 60 * 1000) {
+      const cachedIds: string[] = JSON.parse(cachedRaw);
+      cachedIds.forEach((id) => idSet.add(id));
+      return Array.from(idSet);
     }
-  };
+  } catch {}
 
   try {
-    const [subsSnap, studentsSnap, regSnap, leaveSnap, ticketSnap] = await Promise.all([
-      getDocs(collection(db, 'bot_subscribers')).catch(() => null),
-      getDocs(collection(db, 'students')).catch(() => null),
-      getDocs(collection(db, 'registrations')).catch(() => null),
-      getDocs(collection(db, 'leave_requests')).catch(() => null),
-      getDocs(collection(db, 'support_tickets')).catch(() => null),
-    ]);
-
+    const subsSnap = await getDocs(query(collection(db, 'bot_subscribers'), limit(200))).catch(() => null);
+    const subIds: string[] = [];
     subsSnap?.docs.forEach((d) => {
-      extractId(d.id);
-      extractId(d.data().chatId);
-      extractId(d.data().telegramId);
+      const a = extractCleanTgId(d.id);
+      const b = extractCleanTgId(d.data().chatId);
+      const c = extractCleanTgId(d.data().telegramId);
+      [a, b, c].forEach((val) => {
+        if (val) {
+          idSet.add(val);
+          subIds.push(val);
+        }
+      });
     });
 
-    studentsSnap?.docs.forEach((d) => {
-      const data = d.data();
-      extractId(data.telegramId);
-      extractId(data.tgId);
-      extractId(data.chatId);
-    });
+    // Only read students/registrations if knownMembers wasn't passed
+    if (!knownMembers || knownMembers.length === 0) {
+      const [studentsSnap, regSnap] = await Promise.all([
+        getDocs(query(collection(db, 'students'), limit(250))).catch(() => null),
+        getDocs(query(collection(db, 'registrations'), limit(100))).catch(() => null),
+      ]);
+      studentsSnap?.docs.forEach((d) => {
+        const data = d.data();
+        const id = extractCleanTgId(data.telegramId || data.tgId || data.chatId);
+        if (id) idSet.add(id);
+      });
+      regSnap?.docs.forEach((d) => {
+        const data = d.data();
+        const id = extractCleanTgId(data.telegramId || data.tgId || data.chatId);
+        if (id) idSet.add(id);
+      });
+    }
 
-    regSnap?.docs.forEach((d) => {
-      const data = d.data();
-      extractId(data.telegramId);
-      extractId(data.tgId);
-      extractId(data.chatId);
-    });
-
-    leaveSnap?.docs.forEach((d) => {
-      const data = d.data();
-      extractId(data.telegramId);
-      extractId(data.chatId);
-    });
-
-    ticketSnap?.docs.forEach((d) => {
-      const data = d.data();
-      extractId(data.telegramId);
-      extractId(data.chatId);
-    });
-  } catch (e) {
-    console.warn('Error reading Telegram IDs from Firestore:', e);
-  }
+    try {
+      localStorage.setItem('ww_tg_subs_cache', JSON.stringify(Array.from(new Set(subIds))));
+      localStorage.setItem('ww_tg_subs_fetch_at', String(Date.now()));
+    } catch {}
+  } catch {}
 
   return Array.from(idSet);
 }
 
+export interface BroadcastTargetOptions {
+  explicitTelegramIds?: string[];
+  knownMembers?: Array<{ telegramId?: string | number }>;
+  audienceLabel?: string;
+}
+
 /**
- * Broadcast an announcement message to all known Telegram users.
+ * Broadcast an announcement message to all or targeted Telegram users.
  */
 export async function broadcastTelegramMessage(
   messageContent: string,
   title?: string,
-  senderName?: string
+  senderName?: string,
+  targetOptions?: BroadcastTargetOptions
 ): Promise<BroadcastResult> {
-  const targetIds = await collectAllTelegramIds();
+  const targetIds = targetOptions?.explicitTelegramIds
+    ? Array.from(new Set(targetOptions.explicitTelegramIds.map(extractCleanTgId).filter(Boolean) as string[]))
+    : await collectAllTelegramIds(targetOptions?.knownMembers);
+
+  const audienceLine = targetOptions?.audienceLabel
+    ? `🎯 *ተቀባይ:* ${targetOptions.audienceLabel}\n`
+    : '';
 
   const formattedMsg =
     `📢 *አዲስ ማስታወቂያ (Announcement)*\n` +
     `⛪ *መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን*\n` +
     `═══════════════════════\n\n` +
-    `📌 *${title || 'የወልደ ዋሕድ ሰንበት ት/ቤት ማስታወቂያ'}*\n\n` +
-    `${messageContent}\n\n` +
+    `📌 *${title || 'የወልደ ዋሕድ ሰንበት ት/ቤት ማስታወቂያ'}*\n` +
+    audienceLine +
+    `\n${messageContent}\n\n` +
     `═══════════════════════\n` +
     `✍️ የላከው: *${senderName || 'አስተዳዳሪ'}*\n` +
     `⏰ ሰዓት: ${new Date().toLocaleTimeString('am-ET', { hour: '2-digit', minute: '2-digit' })}`;

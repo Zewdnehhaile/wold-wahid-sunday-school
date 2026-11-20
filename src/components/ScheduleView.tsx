@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { ScheduleItem, DayOfWeek, GradeLevel, SundaySchoolDepartment, Language } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { ScheduleItem, DayOfWeek, GradeLevel, SundaySchoolDepartment, Language, AdminUser } from '../types';
 import { WOLD_WAHID_SCHEDULE } from '../data/initialData';
 import { t } from '../utils/translations';
+import { getUpcomingBahireHasabEvents, formatEthiopianDate } from '../utils/ethiopianCalendar';
+import { BahireHasabPanel } from './BahireHasabPanel';
+import { DutyRosterPanel } from './DutyRosterPanel';
 import {
   db,
   collection,
@@ -30,20 +33,26 @@ import {
   Check,
   RotateCcw,
   Sparkles,
+  UserCheck,
 } from 'lucide-react';
 
 interface ScheduleViewProps {
   onSelectSessionForAttendance: (sessionName: string, grade: string) => void;
   lang: Language;
+  currentAdmin?: AdminUser;
 }
 
 export const ScheduleView: React.FC<ScheduleViewProps> = ({
   onSelectSessionForAttendance,
   lang,
+  currentAdmin,
 }) => {
+  const [sectionTab, setSectionTab] = useState<'schedule' | 'roster' | 'bahire_hasab'>('schedule');
   const [viewMode, setViewMode] = useState<'by_grade' | 'by_day'>('by_grade');
   const [activeGrade, setActiveGrade] = useState<GradeLevel>('pre_kg');
   const [selectedDay, setSelectedDay] = useState<DayOfWeek | 'all'>('all');
+  const upcomingBahire = useMemo(() => getUpcomingBahireHasabEvents(new Date(), 3), []);
+  const todayEthFormatted = useMemo(() => formatEthiopianDate(new Date()), []);
 
   // Schedules state synced with Firestore with local fallback
   const [schedules, setSchedules] = useState<ScheduleItem[]>(() => {
@@ -72,8 +81,15 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
 
   const dict = t[lang];
 
-  // Firestore one-time sync fetch
+  // Firestore one-time sync fetch with 20-min cache to minimize reads
   useEffect(() => {
+    try {
+      const last = Number(localStorage.getItem('ww_schedule_last_fetch_at') || '0');
+      if (localStorage.getItem('ww_schedule_data') && Date.now() - last < 20 * 60 * 1000) {
+        return;
+      }
+    } catch {}
+
     let active = true;
     getDocs(query(collection(db, 'schedules'), limit(50)))
       .then((snapshot) => {
@@ -100,10 +116,11 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
         } else {
           localStorage.setItem('ww_schedule_data', JSON.stringify(WOLD_WAHID_SCHEDULE));
         }
+        try {
+          localStorage.setItem('ww_schedule_last_fetch_at', String(Date.now()));
+        } catch {}
       })
-      .catch((error) => {
-        console.warn('Firestore schedule fetch fallback:', error);
-      });
+      .catch(() => {});
 
     return () => {
       active = false;
@@ -294,79 +311,122 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
   const gradeDays = Array.from(new Set(currentGradeItems.map((item) => item.day)));
 
   return (
-    <div className="space-y-6">
-      {/* Header, Action Controls & View Mode Toggle */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-            <span>{dict.schedule.title}</span>
-            <span className="px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-              {schedules.length} ክፍለ-ጊዜያት
+    <div className="space-y-5">
+      {/* Compact Sub-Navigation + Upcoming Bahire Hasab Strip */}
+      <div className="no-print flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-[#09351c] border border-[#0f4425] rounded-2xl p-3 shadow-lg">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0">
+          {[
+            { id: 'schedule' as const, label: '📅 መርሐ ግብር', icon: Calendar },
+            { id: 'roster' as const, label: '🕊️ የተረኛ አገልጋዮች', icon: UserCheck },
+            { id: 'bahire_hasab' as const, label: '📜 ባሕረ ሐሳብ', icon: Sparkles },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setSectionTab(tab.id)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                sectionTab === tab.id
+                  ? 'bg-amber-500 text-slate-950 shadow-md'
+                  : 'bg-[#062414] text-emerald-200/80 border border-[#0f4425] hover:text-white'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setSectionTab('bahire_hasab')}
+          className="flex items-center gap-2 text-[11px] bg-[#062414] hover:bg-emerald-950 border border-amber-500/30 rounded-xl px-3 py-1.5 text-left transition-colors cursor-pointer shrink-0"
+          title="ሙሉ የባሕረ ሐሳብ መቁጠሪያ ለማየት ይጫኑ"
+        >
+          <span className="font-bold text-amber-400">📅 {todayEthFormatted}</span>
+          {upcomingBahire[0] && (
+            <span className="text-emerald-200/85 border-l border-[#0f4425] pl-2">
+              ቀጣይ: <strong className="text-white">{upcomingBahire[0].nameAm}</strong> ({upcomingBahire[0].ethDateFormatted})
             </span>
-          </h2>
-          <p className="text-sm text-emerald-200/70 mt-1">
-            {dict.schedule.subtitle} ·{' '}
-            <span className="text-amber-400 font-medium">የአርብ፣ የቅዳሜና የእሁድ መርሐ ግብሮች በክፍልና በቀን</span>
-          </p>
-        </div>
-
-        <div className="no-print flex flex-wrap items-center gap-2.5">
-          {/* View mode toggle: By Grade vs By Day */}
-          <div className="bg-[#09351c] border border-[#0f4425] p-1 rounded-xl flex items-center text-xs shadow-inner">
-            <button
-              onClick={() => setViewMode('by_grade')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                viewMode === 'by_grade'
-                  ? 'bg-amber-500 text-slate-950 font-bold shadow'
-                  : 'text-emerald-200/80 hover:text-white'
-              }`}
-            >
-              🎒 በክፍል ደረጃ እይታ
-            </button>
-            <button
-              onClick={() => setViewMode('by_day')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                viewMode === 'by_day'
-                  ? 'bg-amber-500 text-slate-950 font-bold shadow'
-                  : 'text-emerald-200/80 hover:text-white'
-              }`}
-            >
-              📅 በቀናት እይታ
-            </button>
-          </div>
-
-          {/* Add Schedule Item Button */}
-          <button
-            onClick={handleOpenAddModal}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
-          >
-            <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span>አዲስ መርሐ ግብር ጨምር</span>
-          </button>
-
-          {/* Restore Defaults */}
-          <button
-            onClick={handleRestoreDefaults}
-            title="መደበኛ መርሐ ግብር መልስ (Restore Default)"
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#09351c] hover:bg-[#0d4526] text-emerald-200 border border-[#0f4425] rounded-xl text-xs font-medium transition-colors"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden md:inline">መደበኛ መልስ</span>
-          </button>
-
-          {/* Print */}
-          <button
-            onClick={handlePrint}
-            className="inline-flex items-center gap-2 px-3.5 py-2 bg-[#09351c] hover:bg-[#0d4526] text-slate-200 border border-[#0f4425] rounded-xl text-xs font-semibold shadow-sm transition-colors"
-          >
-            <Printer className="w-4 h-4 text-amber-400" />
-            <span>{dict.schedule.printSchedule}</span>
-          </button>
-        </div>
+          )}
+        </button>
       </div>
 
-      {/* MODE 1: BY CLASS / GRADE LEVEL */}
-      {viewMode === 'by_grade' ? (
+      {sectionTab === 'roster' ? (
+        <DutyRosterPanel currentAdmin={currentAdmin} />
+      ) : sectionTab === 'bahire_hasab' ? (
+        <BahireHasabPanel />
+      ) : (
+        <>
+          {/* Header, Action Controls & View Mode Toggle */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+                <span>{dict.schedule.title}</span>
+                <span className="px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  {schedules.length} ክፍለ-ጊዜያት
+                </span>
+              </h2>
+              <p className="text-sm text-emerald-200/70 mt-1">
+                {dict.schedule.subtitle} ·{' '}
+                <span className="text-amber-400 font-medium">የአርብ፣ የቅዳሜና የእሁድ መርሐ ግብሮች በክፍልና በቀን</span>
+              </p>
+            </div>
+
+            <div className="no-print flex flex-wrap items-center gap-2.5">
+              {/* View mode toggle: By Grade vs By Day */}
+              <div className="bg-[#09351c] border border-[#0f4425] p-1 rounded-xl flex items-center text-xs shadow-inner">
+                <button
+                  onClick={() => setViewMode('by_grade')}
+                  className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+                    viewMode === 'by_grade'
+                      ? 'bg-amber-500 text-slate-950 font-bold shadow'
+                      : 'text-emerald-200/80 hover:text-white'
+                  }`}
+                >
+                  🎒 በክፍል ደረጃ እይታ
+                </button>
+                <button
+                  onClick={() => setViewMode('by_day')}
+                  className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+                    viewMode === 'by_day'
+                      ? 'bg-amber-500 text-slate-950 font-bold shadow'
+                      : 'text-emerald-200/80 hover:text-white'
+                  }`}
+                >
+                  📅 በቀናት እይታ
+                </button>
+              </div>
+
+              {/* Add Schedule Item Button */}
+              <button
+                onClick={handleOpenAddModal}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4 stroke-[2.5]" />
+                <span>አዲስ መርሐ ግብር ጨምር</span>
+              </button>
+
+              {/* Restore Defaults */}
+              <button
+                onClick={handleRestoreDefaults}
+                title="መደበኛ መርሐ ግብር መልስ (Restore Default)"
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#09351c] hover:bg-[#0d4526] text-emerald-200 border border-[#0f4425] rounded-xl text-xs font-medium transition-colors"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden md:inline">መደበኛ መልስ</span>
+              </button>
+
+              {/* Print */}
+              <button
+                onClick={handlePrint}
+                className="inline-flex items-center gap-2 px-3.5 py-2 bg-[#09351c] hover:bg-[#0d4526] text-slate-200 border border-[#0f4425] rounded-xl text-xs font-semibold shadow-sm transition-colors"
+              >
+                <Printer className="w-4 h-4 text-amber-400" />
+                <span>{dict.schedule.printSchedule}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* MODE 1: BY CLASS / GRADE LEVEL */}
+          {viewMode === 'by_grade' ? (
         <div className="space-y-6">
           {/* Class Selectors Grid */}
           <div className="no-print grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -622,6 +682,8 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
               );
             })}
         </div>
+      )}
+        </>
       )}
 
       {/* Add / Edit Schedule Item Modal */}

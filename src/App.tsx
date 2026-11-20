@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Member, AttendanceRecord, SupportTicket, LeaveRequest, ServiceSession, Language, SupportStatus, AdminUser } from './types';
+import { Member, AttendanceRecord, SupportTicket, LeaveRequest, ServiceSession, Language, SupportStatus, AdminUser, ParentLinkRequest } from './types';
 import {
   INITIAL_SESSIONS,
   INITIAL_ADMINS,
@@ -8,10 +8,14 @@ import {
   AVATAR_FEMALE,
 } from './data/initialData';
 import { db, collection, doc, getDoc, addDoc, updateDoc, deleteDoc, getDocs, query, where, setDoc, limit } from './firebase';
+import firebaseConfig from '../firebase-applet-config.json';
+import { recordAuditLog } from './utils/auditLog';
 import { t } from './utils/translations';
 import { getPhotoUrl } from './utils/photoUtils';
+import { normalizeStudentCode } from './utils/idCodes';
 import { MemberList } from './components/MemberList';
-import { StudentPortalView } from './components/StudentPortalView';
+import { ParentPortalView } from './components/ParentPortalView';
+import { ParentApproveView } from './components/ParentApproveView';
 import { AttendanceScanner } from './components/AttendanceScanner';
 import { SupportDesk } from './components/SupportDesk';
 import { AnalyticsView } from './components/AnalyticsView';
@@ -48,6 +52,7 @@ import {
   CheckCircle2,
   X,
   KeyRound,
+  UserCheck,
 } from 'lucide-react';
 
 export default function App() {
@@ -77,27 +82,64 @@ export default function App() {
     window.location.search.includes('woldwahidsundayschool') ||
     /Telegram/i.test(navigator.userAgent)
   );
-  const [hasEnteredApp, setHasEnteredApp] = useState(false);
+  const [hasEnteredApp, setHasEnteredApp] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      return sp.get('parent') === '1';
+    }
+    return false;
+  });
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState('members');
-  const [showStudentPortal, setShowStudentPortal] = useState(false);
+  const [showParentPortal, setShowParentPortal] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return new URLSearchParams(window.location.search).get('parent') === '1';
+    }
+    return false;
+  });
 
-  // Live Firestore state with fallback cache for quota limits
-  const [registrations, setRegistrations] = useState<Member[]>(() => {
-    try { return JSON.parse(localStorage.getItem('ww_registrations_cache') || '[]'); } catch { return []; }
-  });
-  const [students, setStudents] = useState<Member[]>(() => {
-    try { return JSON.parse(localStorage.getItem('ww_students_cache') || '[]'); } catch { return []; }
-  });
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => {
-    try { return JSON.parse(localStorage.getItem('ww_attendance_cache') || '[]'); } catch { return []; }
-  });
-  const [tickets, setTickets] = useState<SupportTicket[]>(() => {
-    try { return JSON.parse(localStorage.getItem('ww_tickets_cache') || '[]'); } catch { return []; }
-  });
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(() => {
-    try { return JSON.parse(localStorage.getItem('ww_leave_cache') || '[]'); } catch { return []; }
-  });
+  // Ensure localStorage caches match current active Firestore database & version (clears stale shifted-DB counts like 14 vs 2)
+  const CACHE_SIGNATURE = `${firebaseConfig.firestoreDatabaseId || 'default'}_v4`;
+  const readValidatedCache = <T,>(key: string): T[] => {
+    try {
+      const currentSig = localStorage.getItem('ww_cache_signature');
+      if (currentSig !== CACHE_SIGNATURE) {
+        [
+          'ww_registrations_cache',
+          'ww_students_cache',
+          'ww_attendance_cache',
+          'ww_tickets_cache',
+          'ww_leave_cache',
+          'ww_parent_links_cache',
+          'ww_last_fetch_at',
+          'ww_custom_admins',
+          'ww_admins_last_fetch_at',
+          'ww_schedule_cache',
+          'ww_schedule_last_fetch_at',
+          'ww_tg_subs_cache',
+          'ww_tg_subs_fetch_at',
+          'ww_duty_roster_cache',
+          'ww_lessons_cache',
+          'ww_audit_super_cache',
+          'ww_audit_admin_cache',
+        ].forEach((k) => localStorage.removeItem(k));
+        localStorage.setItem('ww_cache_signature', CACHE_SIGNATURE);
+        return [];
+      }
+      const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  // Cached Firestore state for low-read operation
+  const [registrations, setRegistrations] = useState<Member[]>(() => readValidatedCache<Member>('ww_registrations_cache'));
+  const [students, setStudents] = useState<Member[]>(() => readValidatedCache<Member>('ww_students_cache'));
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => readValidatedCache<AttendanceRecord>('ww_attendance_cache'));
+  const [tickets, setTickets] = useState<SupportTicket[]>(() => readValidatedCache<SupportTicket>('ww_tickets_cache'));
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(() => readValidatedCache<LeaveRequest>('ww_leave_cache'));
+  const [parentLinks, setParentLinks] = useState<ParentLinkRequest[]>(() => readValidatedCache<ParentLinkRequest>('ww_parent_links_cache'));
 
   const [sessions] = useState<ServiceSession[]>(INITIAL_SESSIONS);
   const [activeSession, setActiveSession] = useState<ServiceSession>(INITIAL_SESSIONS[0]);
@@ -123,16 +165,16 @@ export default function App() {
     if (!force) {
       try {
         const lastFetch = Number(localStorage.getItem('ww_last_fetch_at') || '0');
-        const hasCache = registrations.length > 0 || students.length > 0;
-        if (hasCache && Date.now() - lastFetch < 2 * 60 * 1000) {
+        const hasCache = registrations.length > 0 || students.length > 0 || tickets.length > 0;
+        if (hasCache && Date.now() - lastFetch < 10 * 60 * 1000) {
           return;
         }
       } catch {}
     }
     setIsRefreshing(true);
     try {
-      // 1. Fetch registrations
-      const regSnap = await getDocs(query(collection(db, 'registrations'), limit(200)));
+      // 1. Fetch registrations (bounded)
+      const regSnap = await getDocs(query(collection(db, 'registrations'), limit(100)));
       const regList: Member[] = regSnap.docs
         .filter((docSnap: any) => docSnap.data()?.status !== 'deleted')
         .map((docSnap: any) => {
@@ -142,6 +184,7 @@ export default function App() {
           return {
             id: docSnap.id,
             code: d.studentCode || d.code || `PENDING-${d.telegramId ? String(d.telegramId).slice(-4) : docSnap.id.slice(0, 4)}`,
+            legacyCode: d.legacyCode || '',
             fullNameAm: d.fullNameAm || d.fullNameEn || d.nameAm || 'ያልተገለጸ ስም',
             fullNameEn: d.fullNameEn || d.fullNameAm || d.nameEn || 'Unnamed Student',
             phone: d.phone || '',
@@ -164,6 +207,12 @@ export default function App() {
             status: isApproved ? 'active' : (isRejected ? 'rejected' : 'pending_approval'),
             telegramId: d.telegramId || '',
             telegramUsername: d.telegramUsername || '',
+            hasEditedProfileOnce: Boolean(d.hasEditedProfileOnce),
+            pendingEditSummary: d.pendingEditSummary || undefined,
+            parentTelegramId: d.parentTelegramId || '',
+            parentTelegramIds: Array.isArray(d.parentTelegramIds) ? d.parentTelegramIds : [],
+            parentName: d.parentName || '',
+            parentPhone: d.parentPhone || '',
             approvedBy: d.approvedBy,
             approvedAt: d.approvedAt,
             rejectedBy: d.rejectedBy,
@@ -175,8 +224,8 @@ export default function App() {
       setRegistrations(regList);
       localStorage.setItem('ww_registrations_cache', JSON.stringify(regList));
 
-      // 2. Fetch students
-      const studSnap = await getDocs(query(collection(db, 'students'), limit(500)));
+      // 2. Fetch students (bounded)
+      const studSnap = await getDocs(query(collection(db, 'students'), limit(300)));
       const studentList: Member[] = studSnap.docs
         .filter((docSnap: any) => docSnap.data()?.status !== 'deleted')
         .map((docSnap: any) => {
@@ -184,7 +233,8 @@ export default function App() {
           const isPending = d.status === 'pending_approval' || d.status === 'pending';
           return {
             id: docSnap.id,
-            code: d.code || d.studentCode || 'WW-2026-0001',
+            code: d.code || d.studentCode || 'EDU001',
+            legacyCode: d.legacyCode || '',
             fullNameAm: d.fullNameAm || d.fullNameEn || '',
             fullNameEn: d.fullNameEn || d.fullNameAm || '',
             christianName: d.christianName || '',
@@ -207,6 +257,12 @@ export default function App() {
             status: isPending ? 'pending_approval' : (d.status === 'rejected' ? 'rejected' : 'active'),
             telegramId: d.telegramId || '',
             telegramUsername: d.telegramUsername || '',
+            hasEditedProfileOnce: Boolean(d.hasEditedProfileOnce),
+            pendingEditSummary: d.pendingEditSummary || undefined,
+            parentTelegramId: d.parentTelegramId || '',
+            parentTelegramIds: Array.isArray(d.parentTelegramIds) ? d.parentTelegramIds : [],
+            parentName: d.parentName || '',
+            parentPhone: d.parentPhone || '',
             approvedBy: d.approvedBy,
             approvedAt: d.approvedAt,
             rejectedBy: d.rejectedBy,
@@ -216,10 +272,10 @@ export default function App() {
           };
         });
       setStudents(studentList);
-      localStorage.setItem('ww_students_cache', JSON.stringify(studentList));
+      try { localStorage.setItem('ww_students_cache', JSON.stringify(studentList)); } catch {}
 
-      // 3. Fetch tickets
-      const ticketSnap = await getDocs(query(collection(db, 'support_tickets'), limit(50)));
+      // 3. Fetch tickets (bounded)
+      const ticketSnap = await getDocs(query(collection(db, 'support_tickets'), limit(40)));
       const ticketList: SupportTicket[] = ticketSnap.docs.map((docSnap: any) => {
         const d = docSnap.data();
         return {
@@ -236,16 +292,17 @@ export default function App() {
           updatedAt: d.updatedAt || new Date().toISOString(),
           isConfidential: !!d.isConfidential,
           notes: d.notes || [],
+          telegramId: d.telegramId || '',
         };
       });
       setTickets(ticketList);
-      localStorage.setItem('ww_tickets_cache', JSON.stringify(ticketList));
+      try { localStorage.setItem('ww_tickets_cache', JSON.stringify(ticketList)); } catch {}
 
-      // 4. Fetch attendance (Last 7 days)
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      const dateStr = sevenDaysAgo.toISOString().split('T')[0];
-      const attSnap = await getDocs(query(collection(db, 'attendance'), where('date', '>=', dateStr), limit(300)));
+      // 4. Fetch attendance (last 14 days, bounded to 150 records)
+      const twoWeeksAgo = new Date();
+      twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+      const dateStr = twoWeeksAgo.toISOString().split('T')[0];
+      const attSnap = await getDocs(query(collection(db, 'attendance'), where('date', '>=', dateStr), limit(150)));
       const attList: AttendanceRecord[] = attSnap.docs.map((docSnap: any) => {
         const d = docSnap.data();
         return {
@@ -263,10 +320,10 @@ export default function App() {
         };
       });
       setAttendance(attList);
-      localStorage.setItem('ww_attendance_cache', JSON.stringify(attList));
+      try { localStorage.setItem('ww_attendance_cache', JSON.stringify(attList)); } catch {}
 
-      // 5. Fetch leave requests
-      const leaveSnap = await getDocs(query(collection(db, 'leave_requests'), limit(50)));
+      // 5. Fetch leave requests (bounded)
+      const leaveSnap = await getDocs(query(collection(db, 'leave_requests'), limit(40)));
       const leaveList: LeaveRequest[] = leaveSnap.docs.map((docSnap: any) => {
         const d = docSnap.data();
         return {
@@ -282,27 +339,44 @@ export default function App() {
         };
       });
       setLeaveRequests(leaveList);
-      localStorage.setItem('ww_leave_cache', JSON.stringify(leaveList));
-      
-      // 6. Check recent notifications once (avoids persistent onSnapshot quota burn)
+      try { localStorage.setItem('ww_leave_cache', JSON.stringify(leaveList)); } catch {}
+
+      // 6. Fetch parent link requests (bounded)
       try {
-        const notifSnap = await getDocs(query(collection(db, 'notifications'), limit(5)));
-        notifSnap.docs.forEach((docSnap: any) => {
-          const data = docSnap.data();
-          const diffMs = Math.abs(Date.now() - new Date(data.createdAt || Date.now()).getTime());
-          if (diffMs < 2 * 60 * 1000) {
-            if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-              new Notification(data.title || 'ወልደ ዋሕድ ሰንበት ት/ቤት', {
-                body: data.message,
-                icon: '/assets/aistudio/photo_2026-10-22_10-46-07__2__5dd80c37.jpg',
-              });
-            }
-          }
+        const pSnap = await getDocs(query(collection(db, 'parent_links'), limit(50)));
+        const pList: ParentLinkRequest[] = pSnap.docs.map((docSnap: any) => {
+          const d = docSnap.data();
+          return {
+            id: docSnap.id,
+            parentTelegramId: String(d.parentTelegramId || ''),
+            parentTelegramUsername: d.parentTelegramUsername || '',
+            parentName: d.parentName || '',
+            parentPhone: d.parentPhone || '',
+            relation: d.relation || 'ወላጅ / Parent',
+            studentId: d.studentId || '',
+            studentCode: d.studentCode || '',
+            studentNameAm: d.studentNameAm || '',
+            department: d.department || 'education',
+            registeredEmergencyName: d.registeredEmergencyName || '',
+            registeredEmergencyPhone: d.registeredEmergencyPhone || '',
+            status: d.status === 'approved' ? 'approved' : d.status === 'rejected' ? 'rejected' : 'pending',
+            createdAt: d.createdAt || new Date().toISOString(),
+            approvedBy: d.approvedBy,
+            approvedAt: d.approvedAt,
+            rejectedBy: d.rejectedBy,
+            rejectedAt: d.rejectedAt,
+            rejectionReason: d.rejectionReason,
+          };
         });
-      } catch {}
+        setParentLinks(pList);
+        try { localStorage.setItem('ww_parent_links_cache', JSON.stringify(pList)); } catch {}
+      } catch (pErr) {
+        console.warn('Parent links fetch notice:', pErr);
+      }
 
       try {
         localStorage.setItem('ww_last_fetch_at', String(Date.now()));
+        localStorage.setItem('ww_cache_signature', CACHE_SIGNATURE);
       } catch {}
     } catch (error: any) {
       handleSnapshotError('Data Load')(error);
@@ -312,9 +386,9 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!isLoggedIn && !showStudentPortal) return;
+    if (!isLoggedIn) return;
     loadData();
-  }, [isLoggedIn, showStudentPortal]);
+  }, [isLoggedIn]);
 
   // Security Protection: Disable right-click & inspect unless Super Admin
   useEffect(() => {
@@ -373,6 +447,7 @@ export default function App() {
 
   const members = [...approvedList, ...pendingList, ...rejectedList];
   const pendingCount = pendingList.length;
+  const pendingParentLinksCount = parentLinks.filter((p) => p.status === 'pending').length;
 
   // Counter for new support tickets (matches SupportDesk 'አዲስ' count exactly)
   const newSupportTicketsCount = tickets.filter((t) => t.status === 'new').length;
@@ -387,6 +462,7 @@ export default function App() {
   const canMembers = isSuperAdmin || Boolean(perms.canAccessMembers ?? perms.approveStudents);
   const canAttendance = isSuperAdmin || Boolean(perms.canAccessAttendance ?? perms.takeAttendance);
   const canSupport = isSuperAdmin || Boolean(perms.canAccessSupport ?? perms.manageSupport);
+  const canParents = isSuperAdmin || Boolean(perms.canAccessParents ?? canMembers);
   const canAdmins = isSuperAdmin || Boolean(perms.canAccessAdmins);
   const canAnalytics = isSuperAdmin || Boolean(perms.canAccessAnalytics ?? perms.exportReports);
   const canBroadcast = isSuperAdmin || Boolean(perms.canBroadcast);
@@ -396,9 +472,36 @@ export default function App() {
     { id: 'members', label: dict.nav.members, mobileLabel: 'ተማሪዎች', icon: Users, count: pendingCount, allowed: canMembers },
     { id: 'attendance', label: dict.nav.attendance, mobileLabel: 'መገኘት', icon: QrCode, allowed: canAttendance },
     { id: 'support', label: dict.nav.support, mobileLabel: 'ድጋፍ', icon: HeartHandshake, count: newSupportTicketsCount, allowed: canSupport },
+    { id: 'parents', label: dict.nav.parents, mobileLabel: 'ወላጆች', icon: UserCheck, count: pendingParentLinksCount, allowed: canParents },
     { id: 'admins', label: dict.nav.admins, mobileLabel: 'አድሚኖች', icon: ShieldCheck, allowed: canAdmins },
     { id: 'analytics', label: dict.nav.analytics, mobileLabel: 'ሪፖርት', icon: BarChart3, allowed: canAnalytics },
   ].filter((t) => t.allowed);
+
+  // One-time idempotent migration of legacy student codes (WW-2026-*) to department short codes (EDU001, MEZ001, etc.)
+  useEffect(() => {
+    if (!isLoggedIn || !isSuperAdmin) return;
+    try {
+      if (localStorage.getItem('ww_dept_id_migrated_v1')) return;
+    } catch {}
+    let cancelled = false;
+    fetch('/api/admin/migrate-department-ids', { method: 'POST' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.success) {
+          try {
+            localStorage.setItem('ww_dept_id_migrated_v1', '1');
+          } catch {}
+          if (data.migratedCount > 0) {
+            loadData(true);
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn, isSuperAdmin]);
 
   // Auto-redirect if active tab is revoked or not allowed
   useEffect(() => {
@@ -437,7 +540,7 @@ export default function App() {
   }, [isLoggedIn, currentAdmin.id]);
   const handleAddMember = async (newMember: Member) => {
     try {
-      await addDoc(collection(db, 'students'), {
+      const payload = {
         code: newMember.code,
         fullNameAm: newMember.fullNameAm,
         fullNameEn: newMember.fullNameEn,
@@ -445,8 +548,25 @@ export default function App() {
         gender: newMember.gender,
         department: newMember.department,
         gradeLevel: newMember.gradeLevel || 'general',
-        status: 'active',
+        status: 'active' as const,
         registeredDate: new Date().toISOString().split('T')[0],
+      };
+      const ref = await addDoc(collection(db, 'students'), payload);
+      const saved: Member = { ...newMember, id: ref.id || newMember.id, status: 'active' };
+      setStudents((prev) => {
+        const next = [saved, ...prev];
+        try { localStorage.setItem('ww_students_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
+      recordAuditLog({
+        actorId: currentAdmin.id || 'admin',
+        actorName: currentAdmin.nameAm,
+        actorRole: currentAdmin.role,
+        targetType: 'student',
+        targetName: newMember.fullNameAm,
+        action: 'add_student',
+        summaryAm: `አዲስ ተማሪ "${newMember.fullNameAm}" መዝግቧል`,
+        summaryEn: `Added student ${newMember.fullNameAm}`,
       });
     } catch (e) {
       console.error('Error adding member to Firestore:', e);
@@ -455,48 +575,93 @@ export default function App() {
 
   const handleApproveMember = async (memberId: string, manualStudentId: string) => {
     try {
+      const normalizedId = normalizeStudentCode(manualStudentId) || manualStudentId.trim().toUpperCase();
       const targetReg = registrations.find((r) => r.id === memberId) || students.find((s) => s.id === memberId);
       const studentName = targetReg?.fullNameAm || targetReg?.fullNameEn || 'ተማሪ';
+      const approvedAt = new Date().toISOString();
 
       // 1. Update the registration document in Firestore
       const regRef = doc(db, 'registrations', memberId);
       await updateDoc(regRef, {
         status: 'approved',
-        studentCode: manualStudentId,
-        code: manualStudentId,
+        studentCode: normalizedId,
+        code: normalizedId,
+        hasEditedProfileOnce: Boolean(targetReg?.hasEditedProfileOnce),
+        pendingEditSummary: null,
         approvedBy: currentAdmin.nameAm,
-        approvedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        approvedAt,
+        updatedAt: approvedAt,
       }).catch((err) => {
         console.warn('Registration update notice:', err);
       });
 
       // 2. Add or update active student record in students collection using the SAME ID as registration
       const studentData = {
-        code: manualStudentId,
-        studentCode: manualStudentId,
+        code: normalizedId,
+        studentCode: normalizedId,
+        legacyCode: targetReg?.legacyCode || '',
         fullNameAm: targetReg?.fullNameAm || 'ተማሪ',
         fullNameEn: targetReg?.fullNameEn || 'Student',
         christianName: targetReg?.christianName || '',
         birthYear: targetReg?.birthYear || '',
         phone: targetReg?.phone || '',
-        gender: targetReg?.gender || 'male',
+        gender: (targetReg?.gender === 'female' ? 'female' : 'male') as 'male' | 'female',
         department: targetReg?.department || 'education',
-        gradeLevel: targetReg?.gradeLevel || 'general',
+        gradeLevel: (targetReg?.gradeLevel || 'general') as Member['gradeLevel'],
         photoUrl: targetReg?.photoUrl || '',
         emergencyContact: targetReg?.emergencyContact || { name: '', phone: '', relation: '' },
         subcity: targetReg?.subcity || '',
         telegramId: targetReg?.telegramId || '',
         telegramUsername: targetReg?.telegramUsername || '',
+        hasEditedProfileOnce: Boolean(targetReg?.hasEditedProfileOnce),
+        pendingEditSummary: null as any,
+        parentTelegramId: targetReg?.parentTelegramId || '',
+        parentTelegramIds: Array.isArray(targetReg?.parentTelegramIds) ? targetReg.parentTelegramIds : [],
+        parentName: targetReg?.parentName || '',
+        parentPhone: targetReg?.parentPhone || '',
         status: 'active',
         registeredDate: targetReg?.registeredDate || new Date().toISOString().split('T')[0],
         approvedBy: currentAdmin.nameAm,
-        approvedAt: new Date().toISOString(),
-        consecutiveAbsences: 0,
+        approvedAt,
+        consecutiveAbsences: targetReg?.consecutiveAbsences || 0,
       };
 
       // Use setDoc with the same ID as the registration to ensure consistency
       await setDoc(doc(db, 'students', memberId), studentData);
+
+      // Sync local state & cache immediately
+      const activeEntry: Member = {
+        ...(targetReg || ({} as Member)),
+        ...studentData,
+        pendingEditSummary: undefined,
+        id: memberId,
+        roleAm: targetReg?.roleAm || 'ተማሪ / Student',
+        roleEn: targetReg?.roleEn || 'Student',
+        bloodGroup: targetReg?.bloodGroup || 'O+',
+        status: 'active',
+      };
+      setRegistrations((prev) => {
+        const next = prev.map((r) => (r.id === memberId ? { ...r, status: 'active' as const, code: normalizedId, pendingEditSummary: undefined, approvedBy: currentAdmin.nameAm, approvedAt } : r));
+        try { localStorage.setItem('ww_registrations_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
+      setStudents((prev) => {
+        const filtered = prev.filter((s) => s.id !== memberId);
+        const next = [activeEntry, ...filtered];
+        try { localStorage.setItem('ww_students_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
+
+      recordAuditLog({
+        actorId: currentAdmin.id || 'admin',
+        actorName: currentAdmin.nameAm,
+        actorRole: currentAdmin.role,
+        targetType: 'student',
+        targetName: `${studentName} (${manualStudentId})`,
+        action: 'approve_student',
+        summaryAm: `ተማሪ "${studentName}" በመለያ "${manualStudentId}" አጽድቋል`,
+        summaryEn: `Approved student ${studentName} with ID ${manualStudentId}`,
+      });
 
       // 3. Dispatch Telegram approval directly to student
       let sentTg = false;
@@ -536,36 +701,66 @@ export default function App() {
       const targetReg = registrations.find((r) => r.id === memberId) || students.find((s) => s.id === memberId);
       const studentName = targetReg?.fullNameAm || targetReg?.fullNameEn || 'ተማሪ';
       const rejectionReason = reason || 'የምዝገባ መስፈርቱን አላሟላም (Did not meet requirements)';
+      const rejectedAt = new Date().toISOString();
+      const rejectedBy = currentAdmin.nameAm || currentAdmin.nameEn || 'አስተዳዳሪ';
 
       await updateDoc(doc(db, 'registrations', memberId), {
         status: 'rejected',
-        rejectedAt: new Date().toISOString(),
-        rejectedBy: currentAdmin.nameAm || currentAdmin.nameEn || 'አስተዳዳሪ',
+        rejectedAt,
+        rejectedBy,
         rejectionReason: rejectionReason,
       });
 
-      // Also ensure all older registrations for this same user are marked rejected so no stale pending registration remains
+      const tgId = targetReg?.telegramId ? String(targetReg.telegramId) : '';
+      const phone = (targetReg?.phone || '').replace(/\D/g, '').slice(-9);
+      const duplicateRegIds: string[] = [];
+
       if (targetReg) {
-        const tgId = targetReg.telegramId ? String(targetReg.telegramId) : '';
-        const phone = (targetReg.phone || '').replace(/\D/g, '').slice(-9);
-        registrations.forEach(async (r) => {
+        for (const r of registrations) {
           if (r.id !== memberId) {
             const rTg = r.telegramId ? String(r.telegramId) : '';
             const rPhone = (r.phone || '').replace(/\D/g, '').slice(-9);
             if ((tgId && rTg === tgId) || (phone && rPhone && rPhone === phone)) {
+              duplicateRegIds.push(r.id);
               await updateDoc(doc(db, 'registrations', r.id), {
                 status: 'rejected',
-                rejectedAt: new Date().toISOString(),
-                rejectedBy: currentAdmin.nameAm || currentAdmin.nameEn || 'አስተዳዳሪ',
-                rejectionReason: rejectionReason,
+                rejectedAt,
+                rejectedBy,
+                rejectionReason,
               }).catch(() => {});
             }
           }
-        });
+        }
       }
 
       // Remove from active students if exists
       await deleteDoc(doc(db, 'students', memberId)).catch(() => {});
+
+      setRegistrations((prev) => {
+        const next = prev.map((r) =>
+          r.id === memberId || duplicateRegIds.includes(r.id)
+            ? { ...r, status: 'rejected' as const, rejectedAt, rejectedBy, rejectionReason }
+            : r
+        );
+        try { localStorage.setItem('ww_registrations_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
+      setStudents((prev) => {
+        const next = prev.filter((s) => s.id !== memberId);
+        try { localStorage.setItem('ww_students_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
+
+      recordAuditLog({
+        actorId: currentAdmin.id || 'admin',
+        actorName: currentAdmin.nameAm,
+        actorRole: currentAdmin.role,
+        targetType: 'student',
+        targetName: studentName,
+        action: 'reject_student',
+        summaryAm: `የተማሪ "${studentName}" ማመልከቻ ውድቅ አድርጓል (${rejectionReason})`,
+        summaryEn: `Rejected student ${studentName}: ${rejectionReason}`,
+      });
 
       if (targetReg?.telegramId) {
         await sendTelegramMessage(
@@ -573,7 +768,7 @@ export default function App() {
           `❌ *የምዝገባ ጥያቄዎ አልተቀበለም*\n` +
           `ውድ ${studentName}፡ በመካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን የወልደ ዋሕድ ሰ/ት/ቤት የቀረበው የምዝገባ ጥያቄ አልተቀበለም።\n\n` +
           `📌 *የውድቅ ምክንያት*፦ ${rejectionReason}\n` +
-          `✍️ *ውድቅ ያደረገው*፦ ${currentAdmin.nameAm || 'አስተዳዳሪ'}\n\n` +
+          `✍️ *ውድቅ ያደረገው*፦ ${rejectedBy}\n\n` +
           `ለበለጠ መረጃ የሰንበት ት/ቤቱን አስተዳደር በአካል ያነጋግሩ።`,
           { parseMode: 'Markdown' }
         ).catch(console.warn);
@@ -592,59 +787,52 @@ export default function App() {
   const handleDeleteMember = async (memberId: string) => {
     try {
       const targetMember = registrations.find((r) => r.id === memberId) || students.find((s) => s.id === memberId);
-      
-      // Optimistic UI updates
-      setRegistrations((prev) => prev.filter((r) => r.id !== memberId));
-      setStudents((prev) => prev.filter((s) => s.id !== memberId));
+      const targetPhone = (targetMember?.phone || '').replace(/\D/g, '').slice(-9);
+      const targetTgId = targetMember?.telegramId ? String(targetMember.telegramId) : '';
+      const targetName = targetMember?.fullNameAm || targetMember?.fullNameEn || '';
 
-      // 1. Direct doc deletion from both collections
-      await deleteDoc(doc(db, 'registrations', memberId)).catch(() => {});
-      await deleteDoc(doc(db, 'students', memberId)).catch(() => {});
+      const matchesTarget = (m: Member) => {
+        if (m.id === memberId) return true;
+        if (!targetMember) return false;
+        const mPhone = (m.phone || '').replace(/\D/g, '').slice(-9);
+        const mTgId = m.telegramId ? String(m.telegramId) : '';
+        return Boolean(
+          (targetTgId && mTgId && targetTgId === mTgId) ||
+          (targetMember.code && m.code && targetMember.code !== 'PENDING' && m.code === targetMember.code) ||
+          (targetPhone && mPhone && targetPhone === mPhone)
+        );
+      };
 
-      // 2. Cascade delete any associated registration/student entries by phone, telegramId, code, or name
-      if (targetMember) {
-        const targetPhone = (targetMember.phone || '').replace(/\D/g, '').slice(-9);
-        const targetTgId = targetMember.telegramId ? String(targetMember.telegramId) : '';
-        const targetName = targetMember.fullNameAm || targetMember.fullNameEn || '';
+      const matchingRegIds = Array.from(new Set([memberId, ...registrations.filter(matchesTarget).map((r) => r.id)]));
+      const matchingStudIds = Array.from(new Set([memberId, ...students.filter(matchesTarget).map((s) => s.id)]));
 
-        // Clean matching registrations
-        const regSnap = await getDocs(collection(db, 'registrations')).catch(() => null);
-        if (regSnap && regSnap.docs) {
-          for (const regDoc of regSnap.docs) {
-            const d = regDoc.data();
-            const rPhone = (d.phone || '').replace(/\D/g, '').slice(-9);
-            const rTgId = d.telegramId ? String(d.telegramId) : '';
-            
-            const matchTg = targetTgId && rTgId && targetTgId === rTgId;
-            const matchCode = d.studentCode && targetMember.code && d.studentCode === targetMember.code;
-            const matchPhone = targetPhone && rPhone && targetPhone === rPhone;
-            const matchName = targetName && d.fullNameAm && targetName === d.fullNameAm;
+      // Optimistic UI & localStorage updates (0 extra collection-scan reads)
+      setRegistrations((prev) => {
+        const next = prev.filter((r) => !matchingRegIds.includes(r.id));
+        try { localStorage.setItem('ww_registrations_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
+      setStudents((prev) => {
+        const next = prev.filter((s) => !matchingStudIds.includes(s.id));
+        try { localStorage.setItem('ww_students_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
 
-            if (matchTg || matchCode || matchPhone || matchName) {
-              await deleteDoc(doc(db, 'registrations', regDoc.id)).catch(() => {});
-            }
-          }
-        }
+      await Promise.all([
+        ...matchingRegIds.map((id) => deleteDoc(doc(db, 'registrations', id)).catch(() => {})),
+        ...matchingStudIds.map((id) => deleteDoc(doc(db, 'students', id)).catch(() => {})),
+      ]);
 
-        // Clean matching students
-        const studSnap = await getDocs(collection(db, 'students')).catch(() => null);
-        if (studSnap && studSnap.docs) {
-          for (const studDoc of studSnap.docs) {
-            const d = studDoc.data();
-            const sPhone = (d.phone || '').replace(/\D/g, '').slice(-9);
-            const sTgId = d.telegramId ? String(d.telegramId) : '';
-
-            const matchTg = targetTgId && sTgId && targetTgId === sTgId;
-            const matchCode = d.code && targetMember.code && d.code === targetMember.code;
-            const matchPhone = targetPhone && sPhone && targetPhone === sPhone;
-            const matchName = targetName && d.fullNameAm && targetName === d.fullNameAm;
-
-            if (matchTg || matchCode || matchPhone || matchName) {
-              await deleteDoc(doc(db, 'students', studDoc.id)).catch(() => {});
-            }
-          }
-        }
-      }
+      recordAuditLog({
+        actorId: currentAdmin.id || 'admin',
+        actorName: currentAdmin.nameAm,
+        actorRole: currentAdmin.role,
+        targetType: 'student',
+        targetName: targetName || memberId,
+        action: 'delete_student',
+        summaryAm: `ተማሪ "${targetName || memberId}"ን ከሲስተሙ ሰርዟል`,
+        summaryEn: `Deleted student ${targetName || memberId}`,
+      });
 
       setApprovalBanner({
         message: 'ተማሪው ከሲስተሙ ተሰርዟል (Student record deleted).',
@@ -683,9 +871,31 @@ export default function App() {
         updatedAt: new Date().toISOString(),
       };
 
+      setStudents((prev) => {
+        const next = prev.map((s) => (s.id === updated.id ? updated : s));
+        try { localStorage.setItem('ww_students_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
+      setRegistrations((prev) => {
+        const next = prev.map((r) => (r.id === updated.id ? updated : r));
+        try { localStorage.setItem('ww_registrations_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
+
       // Try updating both collections using setDoc with merge for robustness
-      await setDoc(studentRef, updateData, { merge: true }).catch(() => console.log('Member not in students collection'));
-      await setDoc(regRef, updateData, { merge: true }).catch(() => console.log('Member not in registrations collection'));
+      await setDoc(studentRef, updateData, { merge: true }).catch(() => {});
+      await setDoc(regRef, updateData, { merge: true }).catch(() => {});
+
+      recordAuditLog({
+        actorId: currentAdmin.id || 'admin',
+        actorName: currentAdmin.nameAm,
+        actorRole: currentAdmin.role,
+        targetType: 'student',
+        targetName: updated.fullNameAm,
+        action: 'update_student',
+        summaryAm: `የተማሪ "${updated.fullNameAm}" መረጃ አስተካክሏል`,
+        summaryEn: `Updated student ${updated.fullNameAm}`,
+      });
 
       setApprovalBanner({
         message: 'የተማሪ መረጃ በተሳካ ሁኔታ ተስተካክሏል።',
@@ -704,23 +914,59 @@ export default function App() {
 
   const handleCheckIn = async (record: AttendanceRecord) => {
     try {
+      const targetDate = record.date || new Date().toISOString().split('T')[0];
+      const targetSession = record.sessionName || activeSession.nameAm;
+
+      // Prevent duplicate writes if already recorded for the same session/date
+      const alreadyExists = attendance.some(
+        (a) =>
+          a.date === targetDate &&
+          a.sessionName === targetSession &&
+          ((record.memberId && a.memberId === record.memberId) ||
+            (record.memberCode && a.memberCode === record.memberCode))
+      );
+      if (alreadyExists) return;
+
       const matchingStudent = students.find(
         (s) => s.code === record.memberCode || s.id === record.memberId
       );
 
-      await addDoc(collection(db, 'attendance'), {
+      const payload = {
         memberId: record.memberId,
         memberNameAm: record.memberNameAm || matchingStudent?.fullNameAm || 'Student',
         memberNameEn: record.memberNameEn || matchingStudent?.fullNameEn || 'Student',
         memberCode: record.memberCode || matchingStudent?.code || '',
         department: record.department || matchingStudent?.department || 'education',
-        sessionName: record.sessionName || activeSession.nameAm,
+        sessionName: targetSession,
         timestamp: record.timestamp || new Date().toLocaleTimeString(),
-        date: record.date || new Date().toISOString().split('T')[0],
+        date: targetDate,
         method: record.method || 'qr',
         status: record.status || 'present',
         phone: matchingStudent?.phone || '',
         telegramId: matchingStudent?.telegramId || '',
+      };
+
+      const docRef = await addDoc(collection(db, 'attendance'), payload);
+      const savedRecord: AttendanceRecord = {
+        ...record,
+        ...payload,
+        id: docRef.id || record.id,
+      };
+      setAttendance((prev) => {
+        const next = [savedRecord, ...prev];
+        try { localStorage.setItem('ww_attendance_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
+
+      recordAuditLog({
+        actorId: currentAdmin.id || 'admin',
+        actorName: currentAdmin.nameAm,
+        actorRole: currentAdmin.role,
+        targetType: 'attendance',
+        targetName: payload.memberNameAm,
+        action: 'check_in',
+        summaryAm: `የተማሪ "${payload.memberNameAm}" ክትትል (${payload.status === 'present' ? 'ተገኝቷል' : payload.status}) መዝግቧል`,
+        summaryEn: `Recorded attendance (${payload.status}) for ${payload.memberNameAm}`,
       });
     } catch (e) {
       console.error('Check-in failed:', e);
@@ -729,8 +975,23 @@ export default function App() {
 
   const handleDeleteAttendance = async (attendanceId: string) => {
     try {
-      setAttendance((prev) => prev.filter((a) => a.id !== attendanceId));
+      const target = attendance.find((a) => a.id === attendanceId);
+      setAttendance((prev) => {
+        const next = prev.filter((a) => a.id !== attendanceId);
+        try { localStorage.setItem('ww_attendance_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
       await deleteDoc(doc(db, 'attendance', attendanceId));
+      recordAuditLog({
+        actorId: currentAdmin.id || 'admin',
+        actorName: currentAdmin.nameAm,
+        actorRole: currentAdmin.role,
+        targetType: 'attendance',
+        targetName: target?.memberNameAm || attendanceId,
+        action: 'delete_attendance',
+        summaryAm: `የ"${target?.memberNameAm || 'ተማሪ'}" ክትትል መዝገብ ሰርዟል`,
+        summaryEn: `Deleted attendance record for ${target?.memberNameAm || attendanceId}`,
+      });
     } catch (e) {
       console.error('Delete attendance failed:', e);
     }
@@ -738,8 +999,23 @@ export default function App() {
 
   const handleUpdateAttendance = async (attendanceId: string, updated: Partial<AttendanceRecord>) => {
     try {
-      setAttendance((prev) => prev.map((a) => (a.id === attendanceId ? { ...a, ...updated } : a)));
+      const target = attendance.find((a) => a.id === attendanceId);
+      setAttendance((prev) => {
+        const next = prev.map((a) => (a.id === attendanceId ? { ...a, ...updated } : a));
+        try { localStorage.setItem('ww_attendance_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
       await updateDoc(doc(db, 'attendance', attendanceId), updated);
+      recordAuditLog({
+        actorId: currentAdmin.id || 'admin',
+        actorName: currentAdmin.nameAm,
+        actorRole: currentAdmin.role,
+        targetType: 'attendance',
+        targetName: target?.memberNameAm || attendanceId,
+        action: 'update_attendance',
+        summaryAm: `የ"${target?.memberNameAm || 'ተማሪ'}" ክትትል ሁኔታ አስተካክሏል`,
+        summaryEn: `Updated attendance record for ${target?.memberNameAm || attendanceId}`,
+      });
     } catch (e) {
       console.error('Update attendance failed:', e);
     }
@@ -811,25 +1087,15 @@ export default function App() {
         date: new Date().toISOString().replace('T', ' ').slice(0, 16),
       };
       const updatedNotes = [...ticket.notes, newNote];
-      setTickets((prev) => prev.map((t) => (t.id === ticketId ? { ...t, notes: updatedNotes } : t)));
+      setTickets((prev) => {
+        const next = prev.map((t) => (t.id === ticketId ? { ...t, notes: updatedNotes } : t));
+        try { localStorage.setItem('ww_tickets_cache', JSON.stringify(next)); } catch {}
+        return next;
+      });
 
       await updateDoc(doc(db, 'support_tickets', ticketId), {
         notes: updatedNotes,
         updatedAt: new Date().toISOString(),
-      }).catch(console.error);
-
-      // Targeted notification for requester
-      await addDoc(collection(db, 'notifications'), {
-        title: `💬 ለድጋፍ ጥያቄዎ (${ticket.ticketNumber || ticketId}) ምላሽ ተሰጥቷል`,
-        message: `ከ${author || 'አስተዳዳሪ'}: "${text}"`,
-        senderName: author || 'አስተባባሪ',
-        targetRequesterName: ticket.requesterName || '',
-        targetPhone: ticket.phone || '',
-        targetTelegramId: ticket.telegramId || '',
-        ticketId: ticketId,
-        ticketNumber: ticket.ticketNumber || ticketId,
-        createdAt: new Date().toISOString(),
-        isDirectReply: true,
       }).catch(console.error);
 
       // Direct Telegram reply
@@ -856,22 +1122,22 @@ export default function App() {
 
   const handleDeleteTicket = async (ticketId: string) => {
     try {
+      const matchingIds = Array.from(
+        new Set([
+          ticketId,
+          ...tickets
+            .filter((t) => t.id === ticketId || t.ticketNumber === ticketId)
+            .map((t) => t.id),
+        ])
+      );
       setTickets((prev) => {
         const next = prev.filter((t) => t.id !== ticketId && t.ticketNumber !== ticketId);
         try { localStorage.setItem('ww_tickets_cache', JSON.stringify(next)); } catch {}
         return next;
       });
-      await deleteDoc(doc(db, 'support_tickets', ticketId)).catch(() => {});
-      
-      // Also delete from Firestore if ticket has different document ID
-      const querySnap = await getDocs(collection(db, 'support_tickets')).catch(() => null);
-      if (querySnap) {
-        for (const d of querySnap.docs) {
-          if (d.id === ticketId || d.data().id === ticketId || d.data().ticketNumber === ticketId) {
-            await deleteDoc(doc(db, 'support_tickets', d.id)).catch(() => {});
-          }
-        }
-      }
+      await Promise.all(
+        matchingIds.map((id) => deleteDoc(doc(db, 'support_tickets', id)).catch(() => {}))
+      );
     } catch (e) {
       console.error('Delete ticket failed:', e);
     }
@@ -976,6 +1242,17 @@ export default function App() {
         }
       }
 
+      recordAuditLog({
+        actorId: currentAdmin.id || 'admin',
+        actorName: currentAdmin.nameAm,
+        actorRole: currentAdmin.role,
+        targetType: 'leave',
+        targetName: studentName || requestId,
+        action: status === 'approved' ? 'approve_leave' : 'reject_leave',
+        summaryAm: `የተማሪ "${studentName || 'ተማሪ'}" ፈቃድ ጥያቄ ${status === 'approved' ? 'አጽድቋል' : 'ውድቅ አድርጓል'}`,
+        summaryEn: `${status === 'approved' ? 'Approved' : 'Rejected'} leave request for ${studentName || requestId}`,
+      });
+
       setApprovalBanner({
         message: sentTg
           ? (status === 'approved'
@@ -1008,23 +1285,26 @@ export default function App() {
   if (!hasEnteredApp) {
     return (
       <ApkDownloadPage
-        onOpenApp={(asStudent) => {
-          if (asStudent) {
-            setShowStudentPortal(true);
-          }
+        onOpenApp={() => {
+          setHasEnteredApp(true);
+        }}
+        onOpenParentPortal={() => {
+          setShowParentPortal(true);
           setHasEnteredApp(true);
         }}
       />
     );
   }
 
-  if (showStudentPortal) {
+  if (showParentPortal) {
     return (
-      <StudentPortalView
-        members={members}
-        attendance={attendance}
+      <ParentPortalView
+        onBack={() => {
+          setShowParentPortal(false);
+          setIsLoggedIn(false);
+        }}
         onOpenAdminLogin={() => {
-          setShowStudentPortal(false);
+          setShowParentPortal(false);
           setIsLoggedIn(false);
         }}
         lang={lang}
@@ -1053,6 +1333,7 @@ export default function App() {
           const pSchedule = isSuper || Boolean(p.canAccessSchedule);
           const pMembers = isSuper || Boolean(p.canAccessMembers ?? p.approveStudents);
           const pSupport = isSuper || Boolean(p.canAccessSupport ?? p.manageSupport);
+          const pParents = isSuper || Boolean(p.canAccessParents ?? pMembers);
           const pAdmins = isSuper || Boolean(p.canAccessAdmins);
           const pAnalytics = isSuper || Boolean(p.canAccessAnalytics ?? p.exportReports);
 
@@ -1064,6 +1345,8 @@ export default function App() {
             setActiveTab('members');
           } else if (pSupport) {
             setActiveTab('support');
+          } else if (pParents) {
+            setActiveTab('parents');
           } else if (pAdmins) {
             setActiveTab('admins');
           } else if (pAnalytics) {
@@ -1072,7 +1355,7 @@ export default function App() {
             setActiveTab('attendance');
           }
         }}
-        onOpenStudentPortal={() => setShowStudentPortal(true)}
+        onOpenParentPortal={() => setShowParentPortal(true)}
       />
     );
   }
@@ -1244,6 +1527,7 @@ export default function App() {
           <ScheduleView
             onSelectSessionForAttendance={handleSelectSessionFromSchedule}
             lang={lang}
+            currentAdmin={currentAdmin}
           />
         )}
 
@@ -1293,6 +1577,35 @@ export default function App() {
           />
         )}
 
+        {activeTab === 'parents' && canParents && (
+          <ParentApproveView
+            members={members}
+            currentAdmin={currentAdmin}
+            parentLinks={parentLinks}
+            onRefreshParentLinks={() => loadData(true)}
+            onUpdateParentLinksState={(updater) => {
+              setParentLinks((prev) => {
+                const next = typeof updater === 'function' ? updater(prev) : updater;
+                try { localStorage.setItem('ww_parent_links_cache', JSON.stringify(next)); } catch {}
+                return next;
+              });
+            }}
+            onUpdateStudentParentInfo={(studentId, patch) => {
+              setStudents((prev) => {
+                const next = prev.map((s) => (s.id === studentId ? { ...s, ...patch } : s));
+                try { localStorage.setItem('ww_students_cache', JSON.stringify(next)); } catch {}
+                return next;
+              });
+              setRegistrations((prev) => {
+                const next = prev.map((r) => (r.id === studentId ? { ...r, ...patch } : r));
+                try { localStorage.setItem('ww_registrations_cache', JSON.stringify(next)); } catch {}
+                return next;
+              });
+            }}
+            lang={lang}
+          />
+        )}
+
         {activeTab === 'admins' && canAdmins && (
           <AdminManagement
             currentAdmin={currentAdmin}
@@ -1326,6 +1639,8 @@ export default function App() {
         isOpen={isNotificationModalOpen}
         onClose={() => setIsNotificationModalOpen(false)}
         adminName={currentAdmin.nameAm}
+        currentAdmin={currentAdmin}
+        members={members}
       />
 
       {/* Change Password Modal for Active Admin */}

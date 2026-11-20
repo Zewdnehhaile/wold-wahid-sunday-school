@@ -4,9 +4,10 @@ import { WOLD_WAHID_LOGO } from '../data/initialData';
 
 interface ApkDownloadPageProps {
   onOpenApp?: (asStudent?: boolean) => void;
+  onOpenParentPortal?: () => void;
 }
 
-export const ApkDownloadPage: React.FC<ApkDownloadPageProps> = ({ onOpenApp }) => {
+export const ApkDownloadPage: React.FC<ApkDownloadPageProps> = ({ onOpenApp, onOpenParentPortal }) => {
   return (
     <div className="min-h-screen text-slate-100 flex items-center justify-center p-4 relative overflow-hidden font-sans select-none bg-[#062414]">
       {/* Church Background Image */}
@@ -38,7 +39,7 @@ export const ApkDownloadPage: React.FC<ApkDownloadPageProps> = ({ onOpenApp }) =
           </p>
         </div>
 
-        {/* Primary Access Options: Admin Login */}
+        {/* Primary Access Options */}
         <div className="space-y-3 pt-4">
           <button
             type="button"
@@ -48,6 +49,16 @@ export const ApkDownloadPage: React.FC<ApkDownloadPageProps> = ({ onOpenApp }) =
             <Lock className="w-5 h-5" />
             <span>🔐 የአስተዳዳሪ መግቢያ (Admin Portal Login)</span>
           </button>
+
+          {onOpenParentPortal && (
+            <button
+              type="button"
+              onClick={onOpenParentPortal}
+              className="w-full py-3.5 bg-[#062414] hover:bg-emerald-950/90 text-emerald-200 hover:text-amber-300 border border-emerald-500/40 hover:border-amber-400/60 font-bold rounded-2xl shadow-md flex items-center justify-center gap-2.5 cursor-pointer transition text-sm"
+            >
+              <span>👨‍👩‍👧 የወላጆች ክትትል (Parent Portal)</span>
+            </button>
+          )}
         </div>
 
       </div>

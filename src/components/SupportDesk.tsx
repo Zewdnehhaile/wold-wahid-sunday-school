@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { SupportTicket, SupportCategory, SupportStatus, Priority, Member, Language, LeaveRequest, AttendanceRecord } from '../types';
 import { t } from '../utils/translations';
 import { formatEthiopianDate } from '../utils/ethiopianCalendar';
+import { sendTelegramMessage } from '../utils/telegram';
 import {
   HeartHandshake,
   AlertTriangle,
@@ -92,6 +93,107 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
   // Real-time message/request counters
   const newTicketsCount = tickets.filter((t) => t.status === 'new').length;
   const pendingLeavesCount = leaveRequests.filter((l) => l.status === 'pending' || !l.status).length;
+
+  // Smart Follow-Up state (7-day local contacted cache — 0 extra Firestore reads)
+  const [contactedMap, setContactedMap] = useState<Record<string, number>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('ww_followup_contacted') || '{}');
+    } catch {
+      return {};
+    }
+  });
+  const [sendingFollowUpId, setSendingFollowUpId] = useState<string | null>(null);
+
+  const smartFollowUpStudents = useMemo(() => {
+    const cleanSearch = searchAbsenceQuery.trim().toLowerCase();
+    const activeStudents = members.filter((m) => m.status === 'active');
+
+    // Distinct recent attendance dates (sorted newest first)
+    const recentDates = Array.from(
+      new Set(attendance.filter((a) => a.date).map((a) => a.date))
+    )
+      .sort((a, b) => b.localeCompare(a))
+      .slice(0, 3);
+
+    const recentTwoDates = recentDates.slice(0, 2);
+
+    return activeStudents
+      .map((m) => {
+        const studentRecords = attendance.filter(
+          (a) => a.memberId === m.id || (m.code && a.memberCode === m.code)
+        );
+        const explicitAbsences = studentRecords.filter((a) => a.status === 'absent').length;
+        const missedRecentTwo =
+          recentTwoDates.length >= 2 &&
+          recentTwoDates.every(
+            (d) =>
+              !studentRecords.some(
+                (r) => r.date === d && (r.status === 'present' || r.status === 'excused')
+              )
+          );
+        const hasApprovedLeave = leaveRequests.some(
+          (l) =>
+            l.status === 'approved' &&
+            ((l.studentCode && m.code && l.studentCode === m.code) ||
+              (l.studentName && l.studentName === m.fullNameAm))
+        );
+        const missedScore = Math.max(
+          m.consecutiveAbsences || 0,
+          explicitAbsences,
+          missedRecentTwo ? 2 : 0
+        );
+        return {
+          member: m,
+          missedScore,
+          hasApprovedLeave,
+        };
+      })
+      .filter((item) => {
+        if (item.hasApprovedLeave) return false;
+        if (item.missedScore < 2) return false;
+        if (!cleanSearch) return true;
+        return (
+          item.member.fullNameAm.toLowerCase().includes(cleanSearch) ||
+          item.member.code.toLowerCase().includes(cleanSearch) ||
+          item.member.phone.includes(cleanSearch)
+        );
+      })
+      .sort((a, b) => b.missedScore - a.missedScore);
+  }, [members, attendance, leaveRequests, searchAbsenceQuery]);
+
+  const handleSendFollowUp = async (member: Member) => {
+    setSendingFollowUpId(member.id);
+    const msg =
+      `✝️ *ሰላም ውድ ${member.fullNameAm}*,\n` +
+      `⛪ *የወልደ ዋሕድ ሰንበት ትምህርት ቤት*\n` +
+      `═════════════════════\n\n` +
+      `በክርስቶስ ሰላም እንደምን ቆዩን? ባለፉት መርሐ ግብራት ስላልተገኙ ደህንነትዎን ለመጠየቅና ናፍቆታችንን ለመግለጽ ነው።\n` +
+      `የሚያጋጥም ችግር ወይም የጸሎት/የፈቃድ ጥያቄ ካለዎት በዚሁ ቦት ያሳውቁን።\n\n` +
+      `እግዚአብሔር ይጠብቅዎ!`;
+
+    let delivered = false;
+    if (member.telegramId) {
+      try {
+        const res = await sendTelegramMessage(member.telegramId, msg, { parseMode: 'Markdown' });
+        delivered = res.ok;
+      } catch {}
+    }
+
+    const updatedMap = { ...contactedMap, [member.id]: Date.now() };
+    setContactedMap(updatedMap);
+    try {
+      localStorage.setItem('ww_followup_contacted', JSON.stringify(updatedMap));
+    } catch {}
+
+    setSendingFollowUpId(null);
+    setActionNotice({
+      message: delivered
+        ? `ለተማሪ ${member.fullNameAm} የናፍቆትና የክትትል መልእክት በቴሌግራም ተልኳል!`
+        : `${member.fullNameAm} እንደተከታተሉ ተመዝግቧል (በስልክ ማነጋገር ይችላሉ)።`,
+      type: 'success',
+    });
+    setTimeout(() => setActionNotice(null), 4000);
+  };
 
   // Absent Records list (attendance logs with status === 'absent' or 'excused')
   const absentRecords = attendance.filter((a) => {
@@ -330,7 +432,7 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
           }`}
         >
           <CalendarX className={`w-4 h-4 ${activeView === 'absence' ? 'text-slate-950' : 'text-rose-400'}`} />
-          <span>⚠️ የቀሩ ተማሪዎች ክትትል ({absentRecords.length})</span>
+          <span>✨ ክትትልና የቀሩ ተማሪዎች ({smartFollowUpStudents.length + absentRecords.length})</span>
         </button>
       </div>
 
@@ -525,34 +627,110 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
         </div>
       )}
 
-      {/* Enhanced Absence Monitoring & Management Panel */}
+      {/* Enhanced Smart Follow-Up & Absence Monitoring Panel */}
       {activeView === 'absence' && (
-        <div className="bg-[#09351c] rounded-2xl border border-[#0f4425] p-5 space-y-4 shadow-xl">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#0f4425]">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <CalendarX className="w-4 h-4 text-rose-400" />
-              <span>የቀሩ ተማሪዎች የክትትል ሰሌዳ ({absentRecords.length})</span>
-            </h3>
+        <div className="space-y-4">
+          {/* Smart Follow-Up Section */}
+          <div className="bg-[#09351c] rounded-2xl border border-[#0f4425] p-5 space-y-4 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#0f4425]">
+              <div>
+                <h3 className="text-sm font-bold text-amber-300 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span>ተከታታይ ቀሪ ተማሪዎች ፈጣን ክትትል ({smartFollowUpStudents.length})</span>
+                </h3>
+                <p className="text-[11px] text-emerald-200/70 mt-0.5">
+                  2 እና ከዚያ በላይ መርሐ ግብራት የቀሩ ተማሪዎችን በ1 ጠቅታ በቴሌግራም ወይም በስልክ ይጠይቁ
+                </p>
+              </div>
 
-            {/* Search Bar for Absent Students */}
-            <div className="relative flex-1 max-w-md">
-              <Search className="w-3.5 h-3.5 text-amber-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchAbsenceQuery}
-                onChange={(e) => setSearchAbsenceQuery(e.target.value)}
-                placeholder="በስም፣ በመታወቂያ ወይም ክፍለ-ጊዜ ይፈልጉ..."
-                className="w-full pl-9 pr-3 py-1.5 bg-[#062414] border border-[#0f4425] rounded-xl text-xs text-white placeholder-emerald-700/60 focus:outline-none focus:border-amber-400 font-medium"
-              />
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-3.5 h-3.5 text-amber-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchAbsenceQuery}
+                  onChange={(e) => setSearchAbsenceQuery(e.target.value)}
+                  placeholder="በስም፣ በመታወቂያ ወይም ስልክ ይፈልጉ..."
+                  className="w-full pl-9 pr-3 py-1.5 bg-[#062414] border border-[#0f4425] rounded-xl text-xs text-white placeholder-emerald-700/60 focus:outline-none focus:border-amber-400 font-medium"
+                />
+              </div>
             </div>
-          </div>
 
-          <div className="space-y-2.5">
-            {absentRecords.length === 0 ? (
-              <p className="text-xs text-emerald-200/60 py-8 text-center">
-                ምንም የቀረ ተማሪ መዝገብ አልተገኘም።
+            {smartFollowUpStudents.length === 0 ? (
+              <p className="text-xs text-emerald-300/75 py-5 text-center">
+                ✅ በአሁኑ ጊዜ ለተከታታይ ክትትል የተለየ ቀሪ ተማሪ የለም።
               </p>
             ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {smartFollowUpStudents.map(({ member, missedScore }) => {
+                  const contactedAt = contactedMap[member.id];
+                  const recentlyContacted = Boolean(contactedAt && Date.now() - contactedAt < 7 * 24 * 60 * 60 * 1000);
+                  return (
+                    <div
+                      key={member.id}
+                      className="p-3.5 rounded-xl bg-[#062414] border border-[#0f4425] hover:border-amber-500/40 transition-all flex items-center justify-between gap-3 text-xs"
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-white text-sm truncate">{member.fullNameAm}</span>
+                          <span className="text-[10px] font-mono text-amber-400 bg-[#09351c] px-1.5 py-0.5 rounded border border-[#0f4425]">
+                            {member.code}
+                          </span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                            {missedScore}+ ቀሪ
+                          </span>
+                          {recentlyContacted && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                              ✓ ተጠይቋል
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-emerald-200/70 font-mono">
+                          📞 {member.phone || 'ስልክ የለም'}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {member.phone && (
+                          <a
+                            href={`tel:${member.phone}`}
+                            className="p-2 rounded-xl bg-[#09351c] hover:bg-emerald-900 text-emerald-300 border border-[#0f4425] transition-colors"
+                            title="በስልክ ደውል"
+                          >
+                            <Phone className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        <button
+                          type="button"
+                          disabled={sendingFollowUpId === member.id}
+                          onClick={() => handleSendFollowUp(member)}
+                          className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] flex items-center gap-1 shadow cursor-pointer disabled:opacity-50"
+                        >
+                          <Send className="w-3 h-3" />
+                          <span>{sendingFollowUpId === member.id ? 'በመላክ ላይ...' : 'በቴሌግራም ጠይቅ'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Recorded Absence / Excused Logs */}
+          <div className="bg-[#09351c] rounded-2xl border border-[#0f4425] p-5 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between pb-3 border-b border-[#0f4425]">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <CalendarX className="w-4 h-4 text-rose-400" />
+                <span>የተመዘገቡ የቀሩና የፈቃድ መዝገቦች ({absentRecords.length})</span>
+              </h3>
+            </div>
+
+            <div className="space-y-2.5">
+              {absentRecords.length === 0 ? (
+                <p className="text-xs text-emerald-200/60 py-6 text-center">
+                  ምንም የቀረ ተማሪ መዝገብ አልተገኘም።
+                </p>
+              ) : (
               absentRecords.map((rec) => (
                 <div
                   key={rec.id}
@@ -634,6 +812,7 @@ export const SupportDesk: React.FC<SupportDeskProps> = ({
                 </div>
               ))
             )}
+            </div>
           </div>
         </div>
       )}

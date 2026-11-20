@@ -47,6 +47,7 @@ exports.startPolling = startPolling;
 exports.getBot = getBot;
 const firebase_1 = require("./firebase");
 const ethiopianCalendar_1 = require("../utils/ethiopianCalendar");
+const idCardRenderer_1 = require("../utils/idCardRenderer");
 const qrcode_1 = __importDefault(require("qrcode"));
 const dotenv = __importStar(require("dotenv"));
 dotenv.config();
@@ -58,7 +59,7 @@ exports.mainMenuKeyboard = {
             [{ text: '📝 የተማሪ ምዝገባ' }, { text: '🔍 የምዝገባ ሁኔታ' }],
             [{ text: '👤 የኔ መታወቂያና QR' }, { text: '📊 የመገኘት ታሪክ' }],
             [{ text: '📅 የትምህርት መርሐ ግብር' }, { text: '✉️ የፈቃድ መጠየቂያ' }],
-            [{ text: '📱 የሞባይል መተግበሪያ' }, { text: '💬 ድጋፍና እርዳታ' }]
+            [{ text: '💬 ድጋፍና እርዳታ' }]
         ],
         resize_keyboard: true,
     }
@@ -298,44 +299,48 @@ async function findUserRegistrationOrStudent(telegramId, username) {
         const dUser = String(data.telegramUsername || data.telegram_username || '').toLowerCase();
         return (dTg && dTg === tgStr) || (username && dUser && dUser === username.toLowerCase());
     };
-    // 1. Search students collection
+    // 1. Search students collection (skip deleted)
     try {
         const snap = await firebase_1.db.collection('students')
             .where('telegramId', '==', tgStr)
-            .limit(1)
+            .limit(5)
             .get();
-        if (!snap.empty) {
-            allCandidates.push({ type: 'student', data: { id: snap.docs[0].id, ...snap.docs[0].data() } });
+        const validStuds = snap.docs.filter((d) => d.data()?.status !== 'deleted');
+        if (validStuds.length > 0) {
+            allCandidates.push({ type: 'student', data: { id: validStuds[0].id, ...validStuds[0].data() } });
         }
         else if (username) {
             const userSnap = await firebase_1.db.collection('students')
                 .where('telegramUsername', '==', username)
-                .limit(1)
+                .limit(5)
                 .get();
-            if (!userSnap.empty) {
-                allCandidates.push({ type: 'student', data: { id: userSnap.docs[0].id, ...userSnap.docs[0].data() } });
+            const validUserStuds = userSnap.docs.filter((d) => d.data()?.status !== 'deleted');
+            if (validUserStuds.length > 0) {
+                allCandidates.push({ type: 'student', data: { id: validUserStuds[0].id, ...validUserStuds[0].data() } });
             }
         }
     }
     catch (e) {
         console.warn('Notice querying students collection:', e);
     }
-    // 2. Search registrations collection
+    // 2. Search registrations collection (skip deleted)
     try {
         const snap = await firebase_1.db.collection('registrations')
             .where('telegramId', '==', tgStr)
-            .limit(1)
+            .limit(5)
             .get();
-        if (!snap.empty) {
-            allCandidates.push({ type: 'registration', data: { id: snap.docs[0].id, ...snap.docs[0].data() } });
+        const validRegs = snap.docs.filter((d) => d.data()?.status !== 'deleted');
+        if (validRegs.length > 0) {
+            allCandidates.push({ type: 'registration', data: { id: validRegs[0].id, ...validRegs[0].data() } });
         }
         else if (username) {
             const userSnap = await firebase_1.db.collection('registrations')
                 .where('telegramUsername', '==', username)
-                .limit(1)
+                .limit(5)
                 .get();
-            if (!userSnap.empty) {
-                allCandidates.push({ type: 'registration', data: { id: userSnap.docs[0].id, ...userSnap.docs[0].data() } });
+            const validUserRegs = userSnap.docs.filter((d) => d.data()?.status !== 'deleted');
+            if (validUserRegs.length > 0) {
+                allCandidates.push({ type: 'registration', data: { id: validUserRegs[0].id, ...validUserRegs[0].data() } });
             }
         }
     }
@@ -539,9 +544,34 @@ async function handleTelegramUpdateInner(update) {
         lastName: msg.from?.last_name || '',
         lastActiveAt: new Date().toISOString(),
     }, { merge: true }).catch(() => { });
-    // /start command
+    // /start command (including Parent Web Portal login deep link: /start plogin_<token>)
     if (text.startsWith('/start')) {
         await setSession(telegramId, null);
+        const startPayload = text.split(/\s+/)[1] || '';
+        if (startPayload.startsWith('plogin_')) {
+            const loginToken = startPayload.replace('plogin_', '').trim();
+            if (loginToken) {
+                try {
+                    await firebase_1.db.collection('parent_login_tokens').doc(loginToken).set({
+                        token: loginToken,
+                        status: 'verified',
+                        telegramId: String(telegramId),
+                        telegramUsername: username || '',
+                        firstName: msg.from?.first_name || '',
+                        lastName: msg.from?.last_name || '',
+                        verifiedAt: new Date().toISOString(),
+                    }, { merge: true });
+                    await dispatchSendMessage(chatId, `✅ *የወላጅ ፖርታል መግቢያ ተረጋግጧል!*\n` +
+                        `*Parent Web Login Confirmed!*\n\n` +
+                        `ውድ *${msg.from?.first_name || 'ወላጅ'}* ሆይ፡ የወላጅ መከታተያ ፖርታል መግቢያዎ በተሳካ ሁኔታ ተረጋግጧል።\n` +
+                        `👉 አሁን ወደ ከፈቱት ድረ-ገጽ (Browser) ይመለሱ — በራስ-ሰር ይገባል።`, exports.mainMenuKeyboard);
+                    return;
+                }
+                catch (err) {
+                    console.warn('Parent login token confirm notice:', err);
+                }
+            }
+        }
         await dispatchSendMessage(chatId, 'እንኳን ወደ ወልደ ዋሕድ ሰንበት ት/ቤት ቦት በደህና መጡ! ✝️\n' +
             'መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን\n' +
             'Welcome to Wold Wahid Sunday School Bot.\n\n' +
@@ -563,7 +593,6 @@ async function handleTelegramUpdateInner(update) {
         '👤 የኔ መታወቂያና QR', '👤 My QR / Profile', 'የኔ መታወቂያ', '/qr', '/profile',
         '📊 የመገኘት ታሪክ', '📊 My Attendance', 'የመገኘት ታሪክ', '/attendance',
         '📅 የትምህርት መርሐ ግብር', '📅 Class Schedule', 'መርሐ ግብር', 'የክፍል መርሐ ግብር', '/schedule',
-        '📱 የሞባይል መተግበሪያ', '📱 Download Wold Wahid APK', 'መተግበሪያ', '/apk', '/app',
         '✉️ የፈቃድ መጠየቂያ', '✉️ Leave Request', 'የፈቃድ መጠየቂያ', 'ፈቃድ', '/leave',
         '💬 ድጋፍና እርዳታ', '💬 Support & Help', 'ድጋፍና እርዳታ', 'ድጋፍ', '/support'
     ].includes(text);
@@ -944,22 +973,35 @@ async function handleTelegramUpdateInner(update) {
         }
         return;
     }
-    // 3. 👤 MY QR & ID
+    // 3. 👤 MY QR & ID (Sends dual-sided Front & Back ID Card PNGs)
     if (['👤 የኔ መታወቂያና QR', '👤 My QR / Profile', 'የኔ መታወቂያ', '/qr', '/profile'].includes(text)) {
         try {
             const match = await findUserRegistrationOrStudent(telegramId, username);
-            if (!match) {
-                await dispatchSendMessage(chatId, 'የተመዘገበ ተማሪ አልተገኘም። እባክዎ በመጀመሪያ "📝 የተማሪ ምዝገባ" የሚለውን በመጫን ይመዝገቡ ወይንም የስልክ ቁጥርዎን (ምሳሌ፡ `0911234567`) ይላኩ።\nNo active student profile found. Please register first or send your phone number.', exports.mainMenuKeyboard);
+            if (!match || match.data?.status === 'deleted') {
+                await dispatchSendMessage(chatId, 'የተመዘገበ ተማሪ አልተገኘም። እባክዎ በመጀመሪያ "📝 የተማሪ ምዝገባ" የሚለውን በመጫን ይመዝገቡ ወይንም የስልክ ቁጥርዎን (ምሳሌ፡ `0911234567`) ይላኩ።\nNo registered student profile found. Please register first or send your phone number.', exports.mainMenuKeyboard);
                 return;
             }
             const student = match.data;
-            const code = student.studentCode || student.code;
-            if (!code) {
-                await dispatchSendMessage(chatId, '⏳ ምዝገባዎ በአስተዳዳሪው ገና አልጸደቀም። እንደጸደቀ የተማሪ መታወቂያ እና የግል QR ኮድ ይላክሎታል።\nYour registration is still pending review.', exports.mainMenuKeyboard);
+            const rawCode = String(student.studentCode || student.code || '').trim();
+            const hasAssignedCode = Boolean(rawCode) && !rawCode.toUpperCase().startsWith('PENDING');
+            if (student.status === 'rejected') {
+                await dispatchSendMessage(chatId, `❌ *የምዝገባ ጥያቄዎ አልተቀበለም*\n` +
+                    `ምክንያት፦ ${student.rejectionReason || 'ተጨማሪ ማብራሪያ ያስፈልጋል'}\n\n` +
+                    `እንደገና ለመመዝገብ *"📝 የተማሪ ምዝገባ"* የሚለውን ይጫኑ።`, exports.mainMenuKeyboard);
                 return;
             }
+            if (!hasAssignedCode) {
+                if (student.status === 'pending' || student.status === 'pending_approval') {
+                    await dispatchSendMessage(chatId, '⏳ ምዝገባዎ በአስተዳዳሪው ገና አልጸደቀም። እንደጸደቀ የተማሪ መታወቂያ እና የግል QR ኮድ ይላክሎታል።\nYour registration is still pending review.', exports.mainMenuKeyboard);
+                }
+                else {
+                    await dispatchSendMessage(chatId, 'የተመዘገበ ተማሪ አልተገኘም። እባክዎ በመጀመሪያ "📝 የተማሪ ምዝገባ" የሚለውን በመጫን ይመዝገቡ ወይንም የስልክ ቁጥርዎን (ምሳሌ፡ `0911234567`) ይላኩ።\nNo registered student profile found. Please register first or send your phone number.', exports.mainMenuKeyboard);
+                }
+                return;
+            }
+            const code = rawCode.toUpperCase();
             const telegramWebAppUrl = 'https://t.me/attendanceforchurchbot/woldwahidsundayschool';
-            const caption = `👤 *የተማሪ ዲጂታል መታወቂያ (Official Student ID)*\n` +
+            const caption = `👤 *የተማሪ ዲጂታል መታወቂያ (የፊትና የጀርባ ገጽ / Front & Back ID)*\n` +
                 `⛪ *መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን*\n` +
                 `═══════════════════════\n` +
                 `🆔 *የተማሪ መታወቂያ:* \`${code}\`\n` +
@@ -967,10 +1009,8 @@ async function handleTelegramUpdateInner(update) {
                 `✝️ *የክርስትና ስም:* ${student.christianName || 'N/A'}\n` +
                 `📞 *ስልክ (Phone):* ${student.phone || 'N/A'}\n` +
                 `⛪ *ክፍል (Dept):* ${student.department || 'N/A'}\n` +
-                `🟢 *ሁኔታ (Status):* ${student.status || 'Active'}\n` +
-                `═══════════════════════\n\n` +
-                `📲 *ይህ የእርስዎ የግል መታወቂያ QR ኮድ ነው!*\n` +
-                `በሰንበት ት/ቤት የመገኘት መመዝገቢያ ሰዓት ይህንን QR ኮድ ለአስተዳዳሪው ያሳዩ።`;
+                `═══════════════════════\n` +
+                `📲 በመገኘት ሰዓት የፊት ገጹን QR ኮድ ለአስተዳዳሪው ያሳዩ።`;
             const keyboard = {
                 reply_markup: {
                     inline_keyboard: [
@@ -979,6 +1019,66 @@ async function handleTelegramUpdateInner(update) {
                 }
             };
             try {
+                const { front, back } = await (0, idCardRenderer_1.renderDualIdCardPngs)({
+                    code,
+                    fullNameAm: student.fullNameAm || student.nameAm,
+                    fullNameEn: student.fullNameEn || student.nameEn,
+                    department: student.department,
+                    phone: student.phone,
+                    photoUrl: student.photoUrl,
+                    gender: student.gender,
+                    bloodGroup: student.bloodGroup,
+                    registeredDate: student.registeredDate || student.approvedAt || student.submittedAt,
+                    subcity: student.subcity || student.address,
+                    emergencyContact: student.emergencyContact,
+                    emergencyName: student.emergencyName,
+                    emergencyPhone: student.emergencyPhone,
+                    emergencyRelation: student.emergencyRelation,
+                });
+                // Send both Front and Back PNG cards together in one media group
+                const mediaForm = new FormData();
+                mediaForm.append('chat_id', String(chatId));
+                mediaForm.append('front_card', new Blob([new Uint8Array(front)], { type: 'image/png' }), `${code}_front.png`);
+                mediaForm.append('back_card', new Blob([new Uint8Array(back)], { type: 'image/png' }), `${code}_back.png`);
+                mediaForm.append('media', JSON.stringify([
+                    {
+                        type: 'photo',
+                        media: 'attach://front_card',
+                        caption,
+                        parse_mode: 'Markdown',
+                    },
+                    {
+                        type: 'photo',
+                        media: 'attach://back_card',
+                    },
+                ]));
+                const groupRes = await fetch(`https://api.telegram.org/bot${token}/sendMediaGroup`, {
+                    method: 'POST',
+                    body: mediaForm,
+                });
+                const groupData = await groupRes.json();
+                if (!groupData.ok) {
+                    console.warn('sendMediaGroup fallback to sequential sendPhoto:', groupData);
+                    const f1 = new FormData();
+                    f1.append('chat_id', String(chatId));
+                    f1.append('photo', new Blob([new Uint8Array(front)], { type: 'image/png' }), `${code}_front.png`);
+                    f1.append('caption', caption);
+                    f1.append('parse_mode', 'Markdown');
+                    await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: 'POST', body: f1 });
+                    const f2 = new FormData();
+                    f2.append('chat_id', String(chatId));
+                    f2.append('photo', new Blob([new Uint8Array(back)], { type: 'image/png' }), `${code}_back.png`);
+                    f2.append('caption', `🪪 የጀርባ ገጽ (Back Side) · \`${code}\``);
+                    f2.append('parse_mode', 'Markdown');
+                    f2.append('reply_markup', JSON.stringify(keyboard.reply_markup));
+                    await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: 'POST', body: f2 });
+                }
+                else {
+                    await dispatchSendMessage(chatId, `🪪 የእርስዎ ባለ 2-ጎን መታወቂያ (\`${code}\`) ከላይ ተልኳል።`, keyboard);
+                }
+            }
+            catch (err) {
+                console.warn('Dual ID card render failed, fallback to QR image:', err);
                 const qrDataUrl = await qrcode_1.default.toDataURL(code, { width: 400, margin: 2 });
                 const base64Data = qrDataUrl.replace(/^data:image\/png;base64,/, '');
                 const buffer = Buffer.from(base64Data, 'base64');
@@ -994,13 +1094,8 @@ async function handleTelegramUpdateInner(update) {
                 });
                 const data = await res.json();
                 if (!data.ok) {
-                    console.warn('sendPhoto notice:', data);
                     await dispatchSendMessage(chatId, caption, keyboard);
                 }
-            }
-            catch (err) {
-                console.warn('Photo dispatch notice, fallback to text:', err);
-                await dispatchSendMessage(chatId, caption, keyboard);
             }
         }
         catch (err) {
@@ -1147,33 +1242,7 @@ async function handleTelegramUpdateInner(update) {
         await dispatchSendMessage(chatId, exports.scheduleMenuText, { parse_mode: 'Markdown', ...exports.scheduleInlineKeyboard });
         return;
     }
-    // 6. 📱 DOWNLOAD WOLD WAHID APK & WEB APP
-    if (['📱 የሞባይል መተግበሪያ', '📱 Download Wold Wahid APK', 'መተግበሪያ', '/apk', '/app'].includes(text)) {
-        const telegramWebAppUrl = 'https://t.me/attendanceforchurchbot/woldwahidsundayschool';
-        const webUrl = 'https://wold-wahid-sunday-school-app.vercel.app';
-        const apkUrl = `${webUrl}/WoldWahid.apk`;
-        const appMsgText = `📱 *የወልድ ዋሕድ ሰንበት ት/ቤት መተግበሪያ (Wold Wahid App)*\n` +
-            `⛪ *መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን*\n` +
-            `═══════════════════════════════\n\n` +
-            `የሰንበት ትምህርት ቤቱን መተግበሪያ በስልክዎ ለመጠቀም ያሉ አማራጮች፦\n\n` +
-            `✨ *1. በቴሌግራም ዌብ አፕ (Telegram Web App):*\n` +
-            `ምንም አይነት ጭነት ሳያስፈልግዎት በቀጥታ በቴሌግራም ዲጂታል መታወቂያዎን፣ የመገኘት ታሪክዎንና ሳምንታዊ መርሐ ግብርዎን ለመክፈት ከታች ያለውን *"ቴሌግራም ዌብ አፕ ክፈት"* ቁልፍ ይጫኑ።\n\n` +
-            `🍏 *2. ለአይፎን (iOS iPhone / iPad):*\n` +
-            `በ Safari ብሮውዘር ሊንኩን ይክፈቱ ➔ የ Share ምልክቱን ይጫኑ ➔ *"Add to Home Screen (ወደ መነሻ ገጽ ጨምር)"* የሚለውን ይምረጡ። እንደ ማንኛውም የተጫነ መተግበሪያ ከመስመር ውጭ (Offline) ይሰራል።\n\n` +
-            `🤖 *3. ለአንድሮይድ (Android APK):*\n` +
-            `የ Android መተግበሪያውን በቀጥታ በስልክዎ ላይ ለመጫን ከታች ያለውን *"WoldWahid.apk አውርድ"* ቁልፍ ይጫኑ።`;
-        const keyboard = {
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: '🚀 ቴሌግራም ዌብ አፕ ክፈት (Open Web App)', url: telegramWebAppUrl }],
-                    [{ text: '📥 WoldWahid.apk አውርድ (Direct APK)', url: apkUrl }],
-                ],
-            },
-        };
-        await dispatchSendMessage(chatId, appMsgText, keyboard);
-        return;
-    }
-    // 7. ✉️ LEAVE REQUEST WIZARD
+    // 6. ✉️ LEAVE REQUEST WIZARD
     if (['✉️ የፈቃድ መጠየቂያ', '✉️ Leave Request', 'የፈቃድ መጠየቂያ', 'ፈቃድ', '/leave'].includes(text)) {
         await setSession(telegramId, {
             action: 'leave',

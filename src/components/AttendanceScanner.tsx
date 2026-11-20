@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Member, AttendanceRecord, ServiceSession, Language, AdminUser } from '../types';
 import { t } from '../utils/translations';
+import { normalizeStudentCode, studentCodesMatch } from '../utils/idCodes';
 import { formatEthiopianDate, formatEthiopianTime } from '../utils/ethiopianCalendar';
 import { sendTelegramMessage } from '../utils/telegram';
 import { db, collection, addDoc } from '../firebase';
@@ -125,20 +126,22 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
       } catch {}
     }
 
+    const normCode = normalizeStudentCode(raw);
     const cleanCode = raw.trim().toUpperCase();
-    if (!cleanCode) return;
+    if (!normCode) return;
 
     const cleanDigits = cleanCode.replace(/\D/g, '');
 
     const member = members.find((m) => {
-      const c = (m.code || '').toUpperCase();
+      const c = normalizeStudentCode(m.code);
       const id = (m.id || '').toUpperCase();
       const p = (m.phone || '').replace(/\D/g, '');
       return (
-        c === cleanCode ||
+        studentCodesMatch(m.code, normCode) ||
+        studentCodesMatch(m.legacyCode, normCode) ||
         id === cleanCode ||
         (cleanDigits.length >= 9 && p.endsWith(cleanDigits.slice(-9))) ||
-        (cleanCode.length >= 4 && c.endsWith(cleanCode))
+        (normCode.length >= 4 && c.endsWith(normCode))
       );
     });
 
@@ -158,7 +161,10 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
     setScanErrorMessage('');
 
     const alreadyCheckedIn = attendance.some(
-      (att) => att.memberId === member.id && (att.date === todayDate || att.sessionName === activeSession.nameAm)
+      (att) =>
+        (att.memberId === member.id || studentCodesMatch(att.memberCode, member.code)) &&
+        att.date === todayDate &&
+        att.sessionName === activeSession.nameAm
     );
 
     if (alreadyCheckedIn) {
@@ -259,20 +265,38 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
   };
 
   const todayIso = new Date().toISOString().split('T')[0];
-  const [dateFrom, setDateFrom] = useState(todayIso);
-  const [dateTo, setDateTo] = useState(todayIso);
+  // Default to empty so all loaded recent scan dates display immediately without guessing a scan date
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
-  const filteredAttendance = attendance.filter((a) => {
+  const sessionAttendance = attendance.filter((a) => a.sessionName === activeSession.nameAm);
+
+  const recentScanDates = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const rec of sessionAttendance) {
+      if (rec.date) {
+        counts.set(rec.date, (counts.get(rec.date) || 0) + 1);
+      }
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .slice(0, 6);
+  }, [sessionAttendance]);
+
+  const filteredAttendance = sessionAttendance.filter((a) => {
     const aDate = a.date || todayIso;
-    const matchSession = a.sessionName === activeSession.nameAm;
     const matchDate = (!dateFrom || aDate >= dateFrom) && (!dateTo || aDate <= dateTo);
-    return matchSession && matchDate;
+    return matchDate;
   });
 
-  const presentRecords = filteredAttendance.filter(a => a.status !== 'absent');
-  const absentees = members.filter(m => 
-    m.status === 'active' && 
-    !filteredAttendance.some(a => a.memberId === m.id)
+  const presentRecords = filteredAttendance
+    .filter((a) => a.status !== 'absent')
+    .sort((a, b) => `${b.date || ''}${b.timestamp || ''}`.localeCompare(`${a.date || ''}${a.timestamp || ''}`));
+
+  const absentees = members.filter(
+    (m) =>
+      m.status === 'active' &&
+      !filteredAttendance.some((a) => a.memberId === m.id || studentCodesMatch(a.memberCode, m.code))
   );
 
   const handleExportAttendanceCSV = () => {
@@ -492,8 +516,8 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
           </div>
         )}
         <form onSubmit={(e) => { e.preventDefault(); handleProcessCode(codeQuery, 'manual'); }} className="mt-4 flex items-center gap-2">
-          <input type="text" value={codeQuery} onChange={(e) => setCodeQuery(e.target.value)} placeholder="መለያ ቁጥር" className="flex-1 px-3.5 py-2.5 bg-[#062414] border border-[#0f4425] rounded-xl text-xs text-white" />
-          <button type="submit" className="px-4 py-2.5 bg-amber-500 text-slate-950 rounded-xl text-xs font-bold">መዝግብ</button>
+          <input type="text" value={codeQuery} onChange={(e) => setCodeQuery(e.target.value)} placeholder="መለያ ቁጥር (ምሳሌ: EDU001)" className="flex-1 px-3.5 py-2.5 bg-[#062414] border border-[#0f4425] rounded-xl text-xs text-white font-mono" />
+          <button type="submit" className="px-4 py-2.5 bg-amber-500 text-slate-950 rounded-xl text-xs font-bold cursor-pointer">መዝግብ</button>
         </form>
       </div>
 
@@ -526,40 +550,82 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
           </div>
         </div>
 
-        {/* Date Range Filter Bar */}
-        <div className="bg-[#062414] p-4 rounded-2xl border border-[#0f4425] mb-6 flex flex-wrap items-center justify-between gap-3 shadow-inner">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-amber-400" />
-            <span className="text-xs font-bold text-white">በቀን ማጣሪያ (Date Range Filter):</span>
+        {/* Date Range Filter Bar + Quick Scan Date Pills */}
+        <div className="bg-[#062414] p-4 rounded-2xl border border-[#0f4425] mb-6 space-y-3 shadow-inner">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-amber-400" />
+              <span className="text-xs font-bold text-white">በቀን ማጣሪያ (Date Range Filter):</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-emerald-200/70">ከ (From):</span>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="px-2.5 py-1.5 bg-[#09351c] border border-[#0f4425] rounded-xl text-xs text-white font-mono"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-emerald-200/70">እስከ (To):</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="px-2.5 py-1.5 bg-[#09351c] border border-[#0f4425] rounded-xl text-xs text-white font-mono"
+                />
+              </div>
+              {(dateFrom || dateTo) && (
+                <button
+                  type="button"
+                  onClick={() => { setDateFrom(''); setDateTo(''); }}
+                  className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold cursor-pointer"
+                >
+                  ሁሉንም አሳይ (All Days)
+                </button>
+              )}
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-emerald-200/70">ከ (From):</span>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="px-2.5 py-1.5 bg-[#09351c] border border-[#0f4425] rounded-xl text-xs text-white font-mono"
-              />
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-emerald-200/70">እስከ (To):</span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="px-2.5 py-1.5 bg-[#09351c] border border-[#0f4425] rounded-xl text-xs text-white font-mono"
-              />
-            </div>
-            {(dateFrom || dateTo) && (
+
+          <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-[#0f4425]/80">
+            <span className="text-[10px] font-bold text-emerald-200/60 mr-1">የተመዘገቡ ቀናት:</span>
+            <button
+              type="button"
+              onClick={() => { setDateFrom(''); setDateTo(''); }}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                !dateFrom && !dateTo
+                  ? 'bg-amber-500 text-slate-950'
+                  : 'bg-[#09351c] text-emerald-200 border border-[#0f4425] hover:text-white'
+              }`}
+            >
+              ሁሉም ({sessionAttendance.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => { setDateFrom(todayIso); setDateTo(todayIso); }}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                dateFrom === todayIso && dateTo === todayIso
+                  ? 'bg-amber-500 text-slate-950'
+                  : 'bg-[#09351c] text-emerald-200 border border-[#0f4425] hover:text-white'
+              }`}
+            >
+              ዛሬ ({todayIso})
+            </button>
+            {recentScanDates.map(([scanDate, count]) => (
               <button
+                key={scanDate}
                 type="button"
-                onClick={() => { setDateFrom(''); setDateTo(''); }}
-                className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-bold cursor-pointer"
+                onClick={() => { setDateFrom(scanDate); setDateTo(scanDate); }}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold transition cursor-pointer ${
+                  dateFrom === scanDate && dateTo === scanDate
+                    ? 'bg-emerald-500 text-slate-950'
+                    : 'bg-[#09351c] text-emerald-200/80 border border-[#0f4425] hover:text-white'
+                }`}
               >
-                ሁሉንም አሳይ (All Days)
+                {scanDate} ({count})
               </button>
-            )}
+            ))}
           </div>
         </div>
 
@@ -623,7 +689,9 @@ export const AttendanceScanner: React.FC<AttendanceScannerProps> = ({
                   <div key={record.id} className="p-3.5 rounded-xl bg-[#062414] border border-[#0f4425] flex items-center justify-between gap-3 text-xs hover:border-emerald-500/30 transition-colors">
                     <div>
                       <p className="font-bold text-white text-sm">{record.memberNameAm || record.memberNameEn}</p>
-                      <p className="text-[11px] text-amber-400 mt-0.5">{record.memberCode} · ⏰ {record.timestamp}</p>
+                      <p className="text-[11px] text-amber-400 mt-0.5 font-mono">
+                        {record.memberCode} {record.date ? `· 📅 ${record.date}` : ''} · ⏰ {record.timestamp}
+                      </p>
                     </div>
                     <div className="flex items-center gap-2">
                       <select 

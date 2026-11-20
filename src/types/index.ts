@@ -39,6 +39,7 @@ export interface AdminPermission {
   canAccessSupport: boolean;
   canAccessAdmins: boolean;
   canAccessAnalytics: boolean;
+  canAccessParents?: boolean;
   canBroadcast?: boolean;
   // Legacy aliases
   takeAttendance?: boolean;
@@ -61,9 +62,18 @@ export interface AdminUser {
   status?: 'active' | 'suspended';
 }
 
+export interface PendingEditSummary {
+  oldPhone?: string;
+  newPhone?: string;
+  oldBirthYear?: string;
+  newBirthYear?: string;
+  editedAt: string;
+}
+
 export interface Member {
   id: string;
-  code: string; // e.g. "WW-2026-0042" (assigned manually upon approval)
+  code: string; // e.g. "EDU001", "MEZ001", "ABN001", "ART001", "DIS001", "GEN001"
+  legacyCode?: string; // Previous WW-2026-... code preserved for old QR cards
   fullNameAm: string;
   fullNameEn: string;
   phone: string;
@@ -92,6 +102,12 @@ export interface Member {
   telegramId?: string | number;
   telegramUsername?: string;
   consecutiveAbsences: number;
+  hasEditedProfileOnce?: boolean;
+  pendingEditSummary?: PendingEditSummary;
+  parentTelegramId?: string;
+  parentTelegramIds?: string[];
+  parentName?: string;
+  parentPhone?: string;
 }
 
 export interface AttendanceRecord {
@@ -166,3 +182,97 @@ export interface LeaveRequest {
   createdAt: string;
 }
 
+export interface DutyRosterItem {
+  id: string;
+  day: DayOfWeek;
+  gradeLevel: GradeLevel | 'all';
+  dutyAm: string;
+  assigneeName: string;
+  assigneePhone?: string;
+  notes?: string;
+  updatedAt?: string;
+}
+
+export interface LessonItem {
+  id: string;
+  title: string;
+  type: 'lesson' | 'mezmur';
+  gradeLevel: GradeLevel | 'all';
+  summary: string;
+  reference?: string;
+  linkUrl?: string;
+  authorName: string;
+  createdAt: string;
+}
+
+export interface ParentLinkRequest {
+  id: string;
+  parentTelegramId: string;
+  parentTelegramUsername?: string;
+  parentName: string;
+  parentPhone: string;
+  relation: string;
+  studentId: string;
+  studentCode: string;
+  studentNameAm: string;
+  department: string;
+  registeredEmergencyName?: string;
+  registeredEmergencyPhone?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedBy?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+  createdAt: string;
+}
+
+export interface StudentExamScore {
+  id: string;
+  subject: string;
+  score: number;
+  maxScore: number;
+  term: string;
+  date: string;
+  remark?: string;
+}
+
+export interface StudentConductNote {
+  id: string;
+  type: 'commendation' | 'warning' | 'notice';
+  title: string;
+  description: string;
+  date: string;
+  issuer: string;
+}
+
+export interface StudentReportDoc {
+  studentId: string;
+  studentCode: string;
+  exams: StudentExamScore[];
+  conductNotes: StudentConductNote[];
+  updatedAt?: string;
+}
+
+export type AuditTargetType =
+  | 'student'
+  | 'attendance'
+  | 'leave'
+  | 'support'
+  | 'admin'
+  | 'schedule'
+  | 'broadcast'
+  | 'roster'
+  | 'lesson'
+  | 'parent';
+
+export interface AuditLogEntry {
+  id: string;
+  actorId: string;
+  actorName: string;
+  actorRole: UserRole;
+  targetType: AuditTargetType;
+  targetName: string;
+  action: string;
+  summaryAm: string;
+  summaryEn: string;
+  timestamp: string;
+}

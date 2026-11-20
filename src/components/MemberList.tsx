@@ -5,6 +5,12 @@ import { AVATAR_MALE, AVATAR_FEMALE } from '../data/initialData';
 import { getPhotoUrl } from '../utils/photoUtils';
 import { QRCodeView } from './QRCodeView';
 import {
+  suggestNextDepartmentCode,
+  normalizeStudentCode,
+  isDepartmentShortCode,
+  studentCodesMatch,
+} from '../utils/idCodes';
+import {
   Search,
   UserPlus,
   Printer,
@@ -22,7 +28,9 @@ import {
   Sparkles,
   Edit,
   Trash2,
+  History,
 } from 'lucide-react';
+import { AuditLogView } from './AuditLogView';
 
 interface MemberListProps {
   members: Member[];
@@ -53,6 +61,7 @@ export const MemberList: React.FC<MemberListProps> = ({
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [qrModalMember, setQrModalMember] = useState<Member | null>(null);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
 
   // Auto-switch to pending tab if pending registrations arrive and no approved members exist
   React.useEffect(() => {
@@ -112,6 +121,9 @@ export const MemberList: React.FC<MemberListProps> = ({
       m.fullNameAm.toLowerCase().includes(searchTerm.toLowerCase()) ||
       m.fullNameEn.toLowerCase().includes(searchTerm.toLowerCase()) ||
       m.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (m.legacyCode || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      studentCodesMatch(m.code, searchTerm) ||
+      studentCodesMatch(m.legacyCode, searchTerm) ||
       m.phone.includes(searchTerm) ||
       (cleanSearch.length >= 3 && cleanMemberPhone.includes(cleanSearch));
 
@@ -183,9 +195,11 @@ export const MemberList: React.FC<MemberListProps> = ({
 
   const openApproveModal = (member: Member) => {
     setApprovingMember(member);
-    // Suggest a default template e.g. WW-2026-0150
-    const nextNum = 100 + approvedMembers.length + 1;
-    setManualIdInput(`WW-2026-0${nextNum}`);
+    if (isDepartmentShortCode(member.code)) {
+      setManualIdInput(normalizeStudentCode(member.code));
+    } else {
+      setManualIdInput(suggestNextDepartmentCode(member.department, approvedMembers));
+    }
     setIdError('');
   };
 
@@ -193,7 +207,7 @@ export const MemberList: React.FC<MemberListProps> = ({
     e.preventDefault();
     if (!approvingMember) return;
 
-    const trimmedId = manualIdInput.trim().toUpperCase();
+    const trimmedId = normalizeStudentCode(manualIdInput);
     if (!trimmedId) {
       setIdError('እባክዎ የተማሪውን መታወቂያ ኮድ ያስገቡ (Student ID is required)');
       return;
@@ -201,7 +215,7 @@ export const MemberList: React.FC<MemberListProps> = ({
 
     // Check if ID already exists among approved members
     const duplicate = members.some(
-      (m) => m.id !== approvingMember.id && m.status === 'active' && m.code.toUpperCase() === trimmedId
+      (m) => m.id !== approvingMember.id && m.status === 'active' && studentCodesMatch(m.code, trimmedId)
     );
     if (duplicate) {
       setIdError(`ይህ የተማሪ መታወቂያ ("${trimmedId}") ቀድሞ ለሌላ ተማሪ ተሰጥቷል! የተለየ ኮድ ያስገቡ።`);
@@ -248,7 +262,15 @@ export const MemberList: React.FC<MemberListProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-3 w-full sm:w-auto">
+        <div className="flex items-center gap-2.5 w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={() => setIsAuditModalOpen(true)}
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-700 transition-colors cursor-pointer"
+          >
+            <History className="w-4 h-4" />
+            <span>{lang === 'am' ? 'እንቅስቃሴ' : 'Activity'}</span>
+          </button>
           <button
             onClick={() => setIsAddModalOpen(true)}
             className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold shadow-lg shadow-amber-500/20 transition-colors"
@@ -480,9 +502,26 @@ export const MemberList: React.FC<MemberListProps> = ({
                           )}
                         </div>
                       ) : (
-                        <span className="text-amber-400 flex items-center gap-1 font-medium">
-                          <Clock className="w-3.5 h-3.5" /> ማጽደቅ ይፈልጋል
-                        </span>
+                        <div className="space-y-1">
+                          <span className="text-amber-400 flex items-center gap-1 font-medium">
+                            <Clock className="w-3.5 h-3.5" /> ማጽደቅ ይፈልጋል
+                          </span>
+                          {member.pendingEditSummary && (
+                            <div className="p-1.5 rounded-lg bg-sky-500/10 border border-sky-500/30 text-[10px] text-sky-200 space-y-0.5">
+                              <p className="font-bold text-sky-300">📝 መረጃ ተስተካክሏል — ዳግም ማጽደቅ</p>
+                              {member.pendingEditSummary.oldPhone !== member.pendingEditSummary.newPhone && (
+                                <p className="font-mono">
+                                  📱 {member.pendingEditSummary.oldPhone || '—'} → <span className="text-amber-300 font-bold">{member.pendingEditSummary.newPhone}</span>
+                                </p>
+                              )}
+                              {member.pendingEditSummary.oldBirthYear !== member.pendingEditSummary.newBirthYear && (
+                                <p className="font-mono">
+                                  🎂 {member.pendingEditSummary.oldBirthYear || '—'} → <span className="text-amber-300 font-bold">{member.pendingEditSummary.newBirthYear}</span>
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </td>
 
@@ -629,6 +668,22 @@ export const MemberList: React.FC<MemberListProps> = ({
                 </div>
               </div>
 
+              {approvingMember.pendingEditSummary && (
+                <div className="p-3 bg-sky-950/60 border border-sky-500/40 rounded-xl text-xs space-y-1">
+                  <p className="font-bold text-sky-300">📝 የተማሪ 1-ጊዜ ማስተካከያ — ዳግም ማጽደቅ</p>
+                  {approvingMember.pendingEditSummary.oldPhone !== approvingMember.pendingEditSummary.newPhone && (
+                    <p className="text-slate-200 font-mono text-[11px]">
+                      ስልክ፦ {approvingMember.pendingEditSummary.oldPhone || '—'} → <span className="text-amber-300 font-bold">{approvingMember.pendingEditSummary.newPhone}</span>
+                    </p>
+                  )}
+                  {approvingMember.pendingEditSummary.oldBirthYear !== approvingMember.pendingEditSummary.newBirthYear && (
+                    <p className="text-slate-200 font-mono text-[11px]">
+                      የትውልድ ዘመን፦ {approvingMember.pendingEditSummary.oldBirthYear || '—'} → <span className="text-amber-300 font-bold">{approvingMember.pendingEditSummary.newBirthYear}</span>
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Manual ID Input */}
               <div>
                 <label className="block font-semibold text-slate-200 mb-1">
@@ -642,11 +697,11 @@ export const MemberList: React.FC<MemberListProps> = ({
                     setManualIdInput(e.target.value);
                     setIdError('');
                   }}
-                  placeholder="ምሳሌ: WW-2026-0150 ወይም የት/ቤቱ መለያ"
-                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-amber-500/60 rounded-xl text-sm font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-400 shadow-inner"
+                  placeholder="ምሳሌ: EDU001, MEZ001, ABN001"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-amber-500/60 rounded-xl text-sm font-mono font-bold uppercase text-amber-300 focus:outline-none focus:border-amber-400 shadow-inner"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  አስተዳዳሪው የፈለገውን ቁጥር ወይም ቅደም ተከተል መመደብ ይችላል።
+                  ያለ ሰረዝ (hyphen) አጭር የክፍል መለያ (EDU001, MEZ001, ABN001, ART001, DIS001, GEN001) በራስ-ሰር ይቀመጣል።
                 </p>
                 {idError && (
                   <p className="text-rose-400 text-xs font-medium mt-1.5">{idError}</p>
@@ -713,6 +768,24 @@ export const MemberList: React.FC<MemberListProps> = ({
                 <p className="text-white font-medium">{selectedMember.emergencyContact.name}</p>
                 <p className="text-slate-300">{selectedMember.emergencyContact.phone} ({selectedMember.emergencyContact.relation})</p>
               </div>
+
+              {selectedMember.pendingEditSummary && (
+                <div className="p-3.5 bg-sky-950/60 border border-sky-500/40 rounded-xl text-xs space-y-1">
+                  <p className="font-bold text-sky-300">
+                    📝 መረጃ ተስተካክሏል — ዳግም ማጽደቅ (1-Time Self-Edit)
+                  </p>
+                  {selectedMember.pendingEditSummary.oldPhone !== selectedMember.pendingEditSummary.newPhone && (
+                    <p className="text-slate-200 font-mono">
+                      <strong>ስልክ፦</strong> {selectedMember.pendingEditSummary.oldPhone || '—'} → <span className="text-amber-300 font-bold">{selectedMember.pendingEditSummary.newPhone}</span>
+                    </p>
+                  )}
+                  {selectedMember.pendingEditSummary.oldBirthYear !== selectedMember.pendingEditSummary.newBirthYear && (
+                    <p className="text-slate-200 font-mono">
+                      <strong>የትውልድ ዘመን፦</strong> {selectedMember.pendingEditSummary.oldBirthYear || '—'} → <span className="text-amber-300 font-bold">{selectedMember.pendingEditSummary.newBirthYear}</span>
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Approval Audit Card */}
               {selectedMember.approvedBy && (
@@ -1390,6 +1463,32 @@ export const MemberList: React.FC<MemberListProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Role-Scoped Student Activity Log Modal */}
+      {isAuditModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#062414] border border-[#0f4425] rounded-3xl w-full max-w-2xl p-5 sm:p-6 shadow-2xl relative max-h-[88vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-[#0f4425] mb-4 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <History className="w-5 h-5 text-amber-400" />
+                <h3 className="text-base font-bold text-white">
+                  {lang === 'am' ? 'የተማሪዎች አስተዳደር እንቅስቃሴ ታሪክ' : 'Student Activity Log'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAuditModalOpen(false)}
+                className="text-emerald-200/70 hover:text-white p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto pr-1">
+              <AuditLogView role={currentAdminRole} lang={lang} studentOnly={true} />
+            </div>
           </div>
         </div>
       )}
