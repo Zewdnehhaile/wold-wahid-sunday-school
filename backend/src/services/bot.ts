@@ -10,7 +10,7 @@ const token = process.env.TELEGRAM_BOT_TOKEN || '8611581813:AAHadIUrYIkmVzz90Wfv
 
 // In-memory conversation state for multi-step wizards
 export interface UserSession {
-  action: 'register' | 'support' | 'leave';
+  action: 'register' | 'support' | 'leave' | 'edit';
   step: string;
   data: Record<string, any>;
 }
@@ -23,7 +23,7 @@ export const mainMenuKeyboard = {
       [{ text: '📝 የተማሪ ምዝገባ' }, { text: '🔍 የምዝገባ ሁኔታ' }],
       [{ text: '👤 የኔ መታወቂያና QR' }, { text: '📊 የመገኘት ታሪክ' }],
       [{ text: '📅 የትምህርት መርሐ ግብር' }, { text: '✉️ የፈቃድ መጠየቂያ' }],
-      [{ text: '💬 ድጋፍና እርዳታ' }]
+      [{ text: '✏️ መረጃ አስተካክል' }, { text: '💬 ድጋፍና እርዳታ' }]
     ],
     resize_keyboard: true,
   }
@@ -475,6 +475,7 @@ async function handleTelegramUpdateInner(update: any) {
     const cq = update.callback_query;
     const data = cq.data;
     const chatId = cq.message?.chat?.id;
+    const cqFrom = cq.from;
     const cqId = cq.id;
 
     if (cqId) {
@@ -486,6 +487,21 @@ async function handleTelegramUpdateInner(update: any) {
     }
 
     if (!data || !chatId) return;
+
+    if (data === 'edit_reg_menu') {
+      const cqTgId = cqFrom?.id || chatId;
+      const cqUsername = cqFrom?.username || '';
+      await sendEditFieldMenu(chatId, cqTgId, cqUsername);
+      return;
+    }
+
+    if (data.startsWith('edit_field:')) {
+      const field = data.replace('edit_field:', '').trim();
+      const cqTgId = cqFrom?.id || chatId;
+      const cqUsername = cqFrom?.username || '';
+      await startFieldEditPrompt(chatId, cqTgId, cqUsername, field);
+      return;
+    }
 
     if (data === 'sch_menu') {
       await dispatchSendMessage(chatId, scheduleMenuText, { parse_mode: 'Markdown', ...scheduleInlineKeyboard });
@@ -598,6 +614,7 @@ async function handleTelegramUpdateInner(update: any) {
     '📊 የመገኘት ታሪክ', '📊 My Attendance', 'የመገኘት ታሪክ', '/attendance',
     '📅 የትምህርት መርሐ ግብር', '📅 Class Schedule', 'መርሐ ግብር', 'የክፍል መርሐ ግብር', '/schedule',
     '✉️ የፈቃድ መጠየቂያ', '✉️ Leave Request', 'የፈቃድ መጠየቂያ', 'ፈቃድ', '/leave',
+    '✏️ መረጃ አስተካክል', '✏️ Edit Registration', 'መረጃ አስተካክል', '/edit',
     '💬 ድጋፍና እርዳታ', '💬 Support & Help', 'ድጋፍና እርዳታ', 'ድጋፍ', '/support'
   ].includes(text);
 
@@ -729,7 +746,10 @@ async function handleTelegramUpdateInner(update: any) {
         );
       } else if (session.step === 'photo') {
         let photoVal = text;
-        if (photoFileId) {
+        const isNoneText = !photoFileId && String(text || '').trim().toLowerCase() === 'none';
+        if (isNoneText) {
+          photoVal = '';
+        } else if (photoFileId) {
           try {
             const fileInfo = await botInstance.getFile(photoFileId);
             if (fileInfo?.file_size && fileInfo.file_size > 5 * 1024 * 1024) {
@@ -775,37 +795,211 @@ async function handleTelegramUpdateInner(update: any) {
               relation: 'ቤተሰብ / Family'
             },
             department: session.data.department,
-            photoUrl: session.data.photo && session.data.photo !== 'None' ? session.data.photo : '',
+            photoUrl: session.data.photo && String(session.data.photo).toLowerCase() !== 'none' ? session.data.photo : '',
             status: 'pending',
             telegramId: String(telegramId),
             telegramUsername: username,
             submittedAt: new Date().toISOString()
           });
 
+          const savedSummary = { ...session.data };
           await setSession(telegramId, null);
 
+          const hasPhoto = Boolean(savedSummary.photo && String(savedSummary.photo).toLowerCase() !== 'none');
           const successMsg = 
             `🎉 *የተማሪ ምዝገባ (10ቱ ደረጃዎች) በተሳካ ሁኔታ ተልኳል!*\n` +
             `*Registration Submitted Successfully!*\n\n` +
             `📋 *የመረጃ ማጠቃለያ (10 Steps Summary):*\n` +
-            `1. ሙሉ ስም: ${session.data.name}\n` +
-            `2. የክርስትና ስም: ${session.data.christianName}\n` +
-            `3. ጾታ: ${session.data.gender}\n` +
-            `4. የትውልድ ዘመን: ${session.data.birthDate}\n` +
-            `5. ስልክ: ${session.data.phone}\n` +
-            `6. አድራሻ: ${session.data.address}\n` +
-            `7. ተጠሪ ስም: ${session.data.emergencyName}\n` +
-            `8. ተጠሪ ስልክ: ${session.data.emergencyPhone}\n` +
-            `9. ክፍል: ${session.data.department}\n` +
-            `10. ፎቶ: ተካቷል (<= 5MB)\n\n` +
+            `1. ሙሉ ስም: ${savedSummary.name}\n` +
+            `2. የክርስትና ስም: ${savedSummary.christianName}\n` +
+            `3. ጾታ: ${savedSummary.gender}\n` +
+            `4. የትውልድ ዘመን: ${savedSummary.birthDate}\n` +
+            `5. ስልክ: ${savedSummary.phone}\n` +
+            `6. አድራሻ: ${savedSummary.address}\n` +
+            `7. ተጠሪ ስም: ${savedSummary.emergencyName}\n` +
+            `8. ተጠሪ ስልክ: ${savedSummary.emergencyPhone}\n` +
+            `9. ክፍል: ${savedSummary.department}\n` +
+            `10. ፎቶ: ${hasPhoto ? 'ተካቷል (<= 5MB)' : 'አልተካተተም (None)'}\n\n` +
             `⏳ *ሁኔታ:* በመጠባበቅ ላይ (Pending Approval)\n\n` +
             `አስተዳዳሪው ሲያፀድቅ የተማሪ መታወቂያዎና QR ኮድዎ ይደርስዎታል።`;
 
           await dispatchSendMessage(chatId, successMsg, mainMenuKeyboard);
+          await dispatchSendMessage(
+            chatId,
+            '✏️ ስህተት ካለ ወይም መረጃ ለማስተካከል ከታች ያለውን ቁልፍ ይጫኑ፦',
+            {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '✏️ መረጃ አስተካክል (Edit Info)', callback_data: 'edit_reg_menu' }]
+                ]
+              }
+            }
+          );
         } catch (saveErr) {
           console.error('Failed to save registration:', saveErr);
           await dispatchSendMessage(chatId, 'ምዝገባውን ማስቀመጥ አልተቻለም። እባክዎ እንደገና ይሞክሩ።', mainMenuKeyboard);
         }
+      }
+      return;
+    }
+
+    if (session.action === 'edit') {
+      const targetCol = session.data.collectionName || 'registrations';
+      const docId = session.data.docId;
+      const isApprovedEdit = Boolean(session.data.isApprovedEdit);
+      const field = session.step;
+
+      if (!docId) {
+        await setSession(telegramId, null);
+        await dispatchSendMessage(chatId, 'የሚስተካከል ምዝገባ አልተገኘም።', mainMenuKeyboard);
+        return;
+      }
+
+      try {
+        const currentDoc = await db.collection(targetCol).doc(docId).get();
+        const currentData = currentDoc.exists ? currentDoc.data() || {} : {};
+        const patch: Record<string, any> = { updatedAt: new Date().toISOString() };
+
+        if (field === 'fullName') {
+          if (!text) return;
+          patch.fullNameAm = text;
+          patch.fullNameEn = text;
+        } else if (field === 'christianName') {
+          if (!text) return;
+          patch.christianName = text;
+        } else if (field === 'gender') {
+          patch.gender = text.includes('ወንድ') || text.toLowerCase().includes('male') ? 'male' : 'female';
+        } else if (field === 'birthDate') {
+          if (!text) return;
+          patch.birthDate = text;
+          patch.birthYear = text;
+        } else if (field === 'phone') {
+          let cleanPhone = String(text || '').replace(/[\s\-\(\)\+]/g, '');
+          if (cleanPhone.startsWith('251')) cleanPhone = '0' + cleanPhone.slice(3);
+          if (isApprovedEdit && (cleanPhone.length !== 10 || (!cleanPhone.startsWith('09') && !cleanPhone.startsWith('07')))) {
+            await dispatchSendMessage(
+              chatId,
+              '⚠️ ስልክ ቁጥር በትክክል 10 አሃዝ መሆን አለበት እና በ `09` ወይም `07` መጀመር አለበት (ምሳሌ፡ `0911234567`)። እባክዎ እንደገና ያስገቡ፦',
+              cancelKeyboard
+            );
+            return;
+          }
+          patch.phone = cleanPhone || text;
+        } else if (field === 'address') {
+          if (!text) return;
+          patch.address = text;
+          patch.subcity = text;
+        } else if (field === 'emergencyName') {
+          if (!text) return;
+          patch.emergencyName = text;
+          patch.emergencyContact = {
+            ...(currentData.emergencyContact || {}),
+            name: text,
+            phone: currentData.emergencyContact?.phone || currentData.emergencyPhone || '',
+            relation: currentData.emergencyContact?.relation || 'ቤተሰብ / Family',
+          };
+        } else if (field === 'emergencyPhone') {
+          if (!text) return;
+          patch.emergencyPhone = text;
+          patch.emergencyContact = {
+            ...(currentData.emergencyContact || {}),
+            name: currentData.emergencyContact?.name || currentData.emergencyName || '',
+            phone: text,
+            relation: currentData.emergencyContact?.relation || 'ቤተሰብ / Family',
+          };
+        } else if (field === 'department') {
+          if (!text) return;
+          patch.department = text;
+        } else if (field === 'photo') {
+          let photoVal = '';
+          const isNoneText = !photoFileId && String(text || '').trim().toLowerCase() === 'none';
+          if (!isNoneText && photoFileId) {
+            try {
+              const fileInfo = await botInstance.getFile(photoFileId);
+              if (fileInfo?.file_size && fileInfo.file_size > 5 * 1024 * 1024) {
+                await dispatchSendMessage(
+                  chatId,
+                  '⚠️ *ፎቶው ከ 5MB መብለጥ የለበትም!*\nእባክዎ አነስተኛ መጠን ያለው ፎቶ እንደገና ይላኩ፦',
+                  cancelKeyboard
+                );
+                return;
+              }
+              photoVal = fileInfo?.file_path
+                ? `https://api.telegram.org/file/bot${token}/${fileInfo.file_path}`
+                : `tg_file:${photoFileId}`;
+            } catch {
+              photoVal = `tg_file:${photoFileId}`;
+            }
+          } else if (!isNoneText) {
+            photoVal = text;
+          }
+          patch.photoUrl = photoVal;
+        }
+
+        if (isApprovedEdit) {
+          patch.hasEditedProfileOnce = true;
+          patch.pendingEditSummary = {
+            oldPhone: currentData.phone || '',
+            newPhone: patch.phone || currentData.phone || '',
+            oldBirthYear: currentData.birthYear || currentData.birthDate || '',
+            newBirthYear: patch.birthYear || currentData.birthYear || currentData.birthDate || '',
+            editedAt: new Date().toISOString(),
+          };
+          patch.status = targetCol === 'students' ? 'pending_approval' : 'pending';
+        }
+
+        await db.collection(targetCol).doc(docId).update(patch);
+
+        // Keep matching registration/student doc in sync if both exist under the same ID
+        const otherCol = targetCol === 'students' ? 'registrations' : 'students';
+        const otherSnap = await db.collection(otherCol).doc(docId).get();
+        if (otherSnap.exists) {
+          const otherPatch = { ...patch };
+          if (isApprovedEdit) {
+            otherPatch.status = otherCol === 'students' ? 'pending_approval' : 'pending';
+          }
+          await db.collection(otherCol).doc(docId).update(otherPatch).catch(() => {});
+        }
+
+        await setSession(telegramId, null);
+
+        const updatedSnap = await db.collection(targetCol).doc(docId).get();
+        const u = updatedSnap.exists ? updatedSnap.data() || { ...currentData, ...patch } : { ...currentData, ...patch };
+
+        await dispatchSendMessage(
+          chatId,
+          `✅ *መረጃዎ በተሳካ ሁኔታ ተስተካክሏል! (Profile Updated)*\n\n` +
+          `1. ሙሉ ስም: ${u.fullNameAm || u.fullNameEn || 'N/A'}\n` +
+          `2. የክርስትና ስም: ${u.christianName || 'N/A'}\n` +
+          `3. ጾታ: ${u.gender || 'N/A'}\n` +
+          `4. የትውልድ ዘመን: ${u.birthDate || u.birthYear || 'N/A'}\n` +
+          `5. ስልክ: ${u.phone || 'N/A'}\n` +
+          `6. አድራሻ: ${u.address || u.subcity || 'N/A'}\n` +
+          `7. ተጠሪ ስም: ${u.emergencyContact?.name || u.emergencyName || 'N/A'}\n` +
+          `8. ተጠሪ ስልክ: ${u.emergencyContact?.phone || u.emergencyPhone || 'N/A'}\n` +
+          `9. ክፍል: ${u.department || 'N/A'}\n\n` +
+          (isApprovedEdit
+            ? `⏳ የስልክ/የትውልድ ዘመን ለውጥዎ ወደ አስተዳዳሪ ማረጋገጫ ተልኳል።`
+            : `ዋናው ማውጫ ከታች ተመልሷል።`),
+          mainMenuKeyboard
+        );
+        if (!isApprovedEdit) {
+          await dispatchSendMessage(
+            chatId,
+            '✏️ ሌላ መረጃ ማስተካከል ከፈለጉ ከታች ያለውን ቁልፍ ይጫኑ፦',
+            {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                inline_keyboard: [[{ text: '✏️ ሌላ መረጃ አስተካክል (Edit Another Field)', callback_data: 'edit_reg_menu' }]],
+              },
+            }
+          );
+        }
+      } catch (editErr) {
+        console.error('Failed to update registration field:', editErr);
+        await setSession(telegramId, null);
+        await dispatchSendMessage(chatId, 'መረጃውን ማስተካከል አልተቻለም። እባክዎ እንደገና ይሞክሩ።', mainMenuKeyboard);
       }
       return;
     }
@@ -1055,7 +1249,12 @@ async function handleTelegramUpdateInner(update: any) {
         msgText += `\nማመልከቻዎ በአስተዳዳሪው እየታየ ነው፤ እንደጸደቀ የተማሪ መታወቂያዎ ይላክሎታል።`;
       }
 
-      await dispatchSendMessage(chatId, msgText, mainMenuKeyboard);
+      await dispatchSendMessage(chatId, msgText, {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [[{ text: '✏️ መረጃ አስተካክል (Edit Info)', callback_data: 'edit_reg_menu' }]],
+        },
+      });
     } catch (err) {
       console.error('Error fetching registration status:', err);
       await dispatchSendMessage(
@@ -1419,6 +1618,12 @@ async function handleTelegramUpdateInner(update: any) {
     return;
   }
 
+  // 7. ✏️ EDIT REGISTRATION / PROFILE
+  if (['✏️ መረጃ አስተካክል', '✏️ Edit Registration', 'መረጃ አስተካክል', '/edit'].includes(text)) {
+    await sendEditFieldMenu(chatId, telegramId, username);
+    return;
+  }
+
   // 8. 💬 SUPPORT & HELP WIZARD
   if (['💬 ድጋፍና እርዳታ', '💬 Support & Help', 'ድጋፍና እርዳታ', 'ድጋፍ', '/support'].includes(text)) {
     await setSession(telegramId, {
@@ -1454,10 +1659,172 @@ async function handleTelegramUpdateInner(update: any) {
       `👋 ሰላም! እባክዎ ከታች ካሉት አማራጮች አንዱን ይምረጡ፦\n\n` +
       `👉 አዲስ ተማሪ ለመመዝገብ *"📝 የተማሪ ምዝገባ"* የሚለውን ይጫኑ።\n` +
       `👉 የምዝገባ ሁኔታዎን ለማየት *"🔍 የምዝገባ ሁኔታ"* የሚለውን ይጫኑ።\n` +
+      `👉 መረጃ ለማስተካከል *"✏️ መረጃ አስተካክል"* የሚለውን ይጫኑ።\n` +
       `👉 መታወቂያዎን ለማውረድ *"👤 የኔ መታወቂያና QR"* የሚለውን ይጫኑ።`,
       mainMenuKeyboard
     );
   }
+}
+
+async function sendEditFieldMenu(chatId: number | string, telegramId: number, username?: string) {
+  const match = await findUserRegistrationOrStudent(telegramId, username);
+  if (!match || match.data?.status === 'deleted') {
+    await dispatchSendMessage(
+      chatId,
+      '⚠️ የሚስተካከል የተማሪ ምዝገባ አልተገኘም። እባክዎ መጀመሪያ *"📝 የተማሪ ምዝገባ"* የሚለውን በመጫን ይመዝገቡ ወይም ስልክ ቁጥርዎን ይላኩ።',
+      mainMenuKeyboard
+    );
+    return;
+  }
+
+  const reg = match.data;
+  const isApproved = reg.status === 'approved' || reg.status === 'active';
+
+  if (isApproved) {
+    if (reg.hasEditedProfileOnce) {
+      await dispatchSendMessage(
+        chatId,
+        '⚠️ የመረጃ ማስተካከያ እድልዎን (1 ጊዜ) አስቀድመው ተጠቅመዋል። ተጨማሪ ለውጥ ካስፈለገ *"💬 ድጋፍና እርዳታ"* በመጫን አስተዳዳሪን ያነጋግሩ።',
+        mainMenuKeyboard
+      );
+      return;
+    }
+
+    await dispatchSendMessage(
+      chatId,
+      `✏️ *የጸደቀ መገለጫ ማስተካከያ (1-Time Self-Edit)*\n` +
+      `🆔 *መታወቂያ:* \`${reg.studentCode || reg.code || ''}\`\n\n` +
+      `ከጸደቀ በኋላ *ስልክ ቁጥር* ወይም *የትውልድ ዘመን* (1 ጊዜ ብቻ) ማስተካከል ይችላሉ፤ ለውጡ በአስተዳዳሪ ዳግም ይጸድቃል።\n` +
+      `የቱን ማስተካከል ይፈልጋሉ?`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '📱 ስልክ ቁጥር (Phone)', callback_data: 'edit_field:phone' },
+              { text: '📅 የትውልድ ዘመን (Birth Year)', callback_data: 'edit_field:birthDate' },
+            ],
+          ],
+        },
+      }
+    );
+    return;
+  }
+
+  await dispatchSendMessage(
+    chatId,
+    `✏️ *የምዝገባ መረጃ ማስተካከያ (Edit Registration)*\n` +
+    `👤 *ስም:* ${reg.fullNameAm || reg.fullNameEn || 'ተማሪ'}\n` +
+    `📱 *ስልክ:* ${reg.phone || 'N/A'}\n\n` +
+    `ማስተካከል የሚፈልጉትን መረጃ ከታች ይምረጡ፦`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '👤 ሙሉ ስም', callback_data: 'edit_field:fullName' },
+            { text: '✝️ የክርስትና ስም', callback_data: 'edit_field:christianName' },
+          ],
+          [
+            { text: '⚧ ጾታ', callback_data: 'edit_field:gender' },
+            { text: '📅 የትውልድ ዘመን', callback_data: 'edit_field:birthDate' },
+          ],
+          [
+            { text: '📱 ስልክ ቁጥር', callback_data: 'edit_field:phone' },
+            { text: '📍 አድራሻ', callback_data: 'edit_field:address' },
+          ],
+          [
+            { text: '🛡️ የተጠሪ ስም', callback_data: 'edit_field:emergencyName' },
+            { text: '📞 የተጠሪ ስልክ', callback_data: 'edit_field:emergencyPhone' },
+          ],
+          [
+            { text: '⛪ ክፍል (Dept)', callback_data: 'edit_field:department' },
+            { text: '📸 ፎቶ (Photo)', callback_data: 'edit_field:photo' },
+          ],
+          [{ text: '🔄 ሁሉንም 10 ደረጃዎች እንደገና ሙላ', callback_data: 'edit_field:redo_all' }],
+        ],
+      },
+    }
+  );
+}
+
+async function startFieldEditPrompt(chatId: number | string, telegramId: number, username: string, field: string) {
+  const match = await findUserRegistrationOrStudent(telegramId, username);
+  if (!match || match.data?.status === 'deleted') {
+    await dispatchSendMessage(chatId, '⚠️ የሚስተካከል ምዝገባ አልተገኘም።', mainMenuKeyboard);
+    return;
+  }
+
+  const reg = match.data;
+  const isApproved = reg.status === 'approved' || reg.status === 'active';
+  const collectionName = match.type === 'student' ? 'students' : 'registrations';
+
+  if (field === 'redo_all' && !isApproved) {
+    await setSession(telegramId, { action: 'register', step: 'name', data: {} });
+    await dispatchSendMessage(
+      chatId,
+      '📝 *የተማሪ ምዝገባ (Step 1/10)*\nእባክዎ አዲሱን ሙሉ ስምዎን ያስገቡ፦',
+      cancelKeyboard
+    );
+    return;
+  }
+
+  if (isApproved) {
+    if (reg.hasEditedProfileOnce) {
+      await dispatchSendMessage(chatId, '⚠️ የ1 ጊዜ ማስተካከያ እድልዎን አስቀድመው ተጠቅመዋል።', mainMenuKeyboard);
+      return;
+    }
+    if (field !== 'phone' && field !== 'birthDate') {
+      await dispatchSendMessage(chatId, '⚠️ ከጸደቀ በኋላ ስልክ ቁጥር ወይም የትውልድ ዘመን ብቻ ማስተካከል ይቻላል።', mainMenuKeyboard);
+      return;
+    }
+  }
+
+  await setSession(telegramId, {
+    action: 'edit',
+    step: field,
+    data: { docId: reg.id, collectionName, isApprovedEdit: isApproved },
+  });
+
+  if (field === 'gender') {
+    await dispatchSendMessage(chatId, '👤 *አዲስ ጾታ ይምረጡ፦*', {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        keyboard: [[{ text: 'ወንድ (Male)' }, { text: 'ሴት (Female)' }], [{ text: '❌ Cancel (ይቅር)' }]],
+        resize_keyboard: true,
+      },
+    });
+    return;
+  }
+
+  if (field === 'department') {
+    await dispatchSendMessage(chatId, '⛪ *አዲስ ክፍል ይምረጡ፦*', {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        keyboard: [
+          [{ text: 'ትምህርት ክፍል (Education)' }, { text: 'መዝሙር ክፍል (Choir)' }],
+          [{ text: 'ኪነ-ጥበብ ክፍል (Arts)' }, { text: 'አብነት ክፍል (Abnet)' }],
+          [{ text: 'ስነ-ስርዓት ክፍል (Discipline)' }, { text: 'አጠቃላይ አባል (General)' }],
+          [{ text: '❌ Cancel (ይቅር)' }],
+        ],
+        resize_keyboard: true,
+      },
+    });
+    return;
+  }
+
+  const promptMap: Record<string, string> = {
+    fullName: '👤 *አዲስ ሙሉ ስም ያስገቡ፦*',
+    christianName: '✝️ *አዲስ የክርስትና ስም ያስገቡ፦*',
+    birthDate: '📅 *አዲስ የትውልድ ዘመን ያስገቡ፦* (ምሳሌ፡ 1995)',
+    phone: '📱 *አዲስ ስልክ ቁጥር ያስገቡ፦* (ምሳሌ፡ 0911234567)',
+    address: '📍 *አዲስ የመኖሪያ አድራሻ ያስገቡ፦*',
+    emergencyName: '🛡️ *አዲስ የቅርብ ተጠሪ ስም ያስገቡ፦*',
+    emergencyPhone: '📞 *አዲስ የቅርብ ተጠሪ ስልክ ቁጥር ያስገቡ፦*',
+    photo: '📸 *አዲስ ፎቶ ይላኩ (ከ 5MB ያልበለጠ) ወይም "None" ብለው ይጻፉ፦*',
+  };
+
+  await dispatchSendMessage(chatId, promptMap[field] || '✏️ *አዲሱን መረጃ ያስገቡ፦*', cancelKeyboard);
 }
 
 // ─── RESILIENT NATIVE TELEGRAM LONG-POLLING ENGINE ───
