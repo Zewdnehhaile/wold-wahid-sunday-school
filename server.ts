@@ -24,11 +24,12 @@ async function startServer() {
   app.use(cors());
   app.use(express.json());
 
-  // Cache-busting middleware: prevent stale browser caching of HTML & API responses
+  // Cache-busting middleware + COOP allow-popups for Telegram OIDC Login popup
   app.use((req, res, next) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
     next();
   });
 
@@ -985,55 +986,158 @@ async function startServer() {
     }
   });
 
+  let cachedTgJwks: { keys: any[]; fetchedAt: number } | null = null;
+
+  async function fetchTelegramJwks(forceRefresh = false): Promise<any[]> {
+    if (!forceRefresh && cachedTgJwks && Date.now() - cachedTgJwks.fetchedAt < 3600_000) {
+      return cachedTgJwks.keys;
+    }
+    const resp = await fetch('https://oauth.telegram.org/.well-known/jwks.json');
+    const json: any = await resp.json();
+    const keys = Array.isArray(json?.keys) ? json.keys : [];
+    cachedTgJwks = { keys, fetchedAt: Date.now() };
+    return keys;
+  }
+
+  function decodeBase64UrlJson(segment: string): any {
+    const norm = segment.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = norm.length % 4;
+    const padded = pad ? norm + '='.repeat(4 - pad) : norm;
+    return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+  }
+
+  function decodeBase64UrlBuffer(segment: string): Buffer {
+    const norm = segment.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = norm.length % 4;
+    const padded = pad ? norm + '='.repeat(4 - pad) : norm;
+    return Buffer.from(padded, 'base64');
+  }
+
+  async function verifyTelegramOidcIdToken(idToken: string, expectedAud: string) {
+    const parts = idToken.split('.');
+    if (parts.length !== 3) {
+      throw new Error('Malformed Telegram OIDC token');
+    }
+    const header = decodeBase64UrlJson(parts[0]);
+    const claims = decodeBase64UrlJson(parts[1]);
+    const sigBuf = decodeBase64UrlBuffer(parts[2]);
+    const signingInput = Buffer.from(`${parts[0]}.${parts[1]}`, 'utf8');
+
+    let keys = await fetchTelegramJwks(false);
+    let jwk = keys.find((k: any) => k.kid === header.kid);
+    if (!jwk) {
+      keys = await fetchTelegramJwks(true);
+      jwk = keys.find((k: any) => k.kid === header.kid);
+    }
+    if (!jwk) {
+      throw new Error('Matching Telegram signing key not found');
+    }
+
+    const publicKey = crypto.createPublicKey({ key: jwk, format: 'jwk' });
+    const alg = String(header.alg || jwk.alg || 'RS256');
+    let verified = false;
+    if (alg === 'RS256') {
+      verified = crypto.verify('sha256', signingInput, publicKey, sigBuf);
+    } else if (alg === 'ES256' || alg === 'ES256K') {
+      verified = crypto.verify('sha256', signingInput, { key: publicKey, dsaEncoding: 'ieee-p1363' }, sigBuf);
+    } else if (alg === 'EdDSA') {
+      verified = crypto.verify(null, signingInput, publicKey, sigBuf);
+    } else {
+      throw new Error(`Unsupported JWT algorithm: ${alg}`);
+    }
+
+    if (!verified) {
+      throw new Error('Invalid Telegram OIDC token signature');
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (claims.iss !== 'https://oauth.telegram.org') {
+      throw new Error('Invalid Telegram OIDC issuer');
+    }
+    if (String(claims.aud || '') !== String(expectedAud)) {
+      throw new Error('Invalid Telegram OIDC audience');
+    }
+    if (!claims.exp || Number(claims.exp) + 60 < nowSec) {
+      throw new Error('Telegram OIDC session expired');
+    }
+    return claims;
+  }
+
   app.post('/api/parent/auth/telegram-widget', async (req, res) => {
     try {
       const payload = req.body || {};
-      const { id, auth_date, hash, first_name, last_name, username, photo_url } = payload;
-
-      if (!id || !auth_date || !hash) {
-        return res.status(400).json({ error: 'Invalid Telegram authentication payload' });
-      }
-
-      // Check auth_date freshness (allow up to 24 hours)
-      const nowSec = Math.floor(Date.now() / 1000);
-      const authSec = Number(auth_date);
-      if (!Number.isFinite(authSec) || Math.abs(nowSec - authSec) > 86400) {
-        return res.status(401).json({ error: 'የቴሌግራም መግቢያ ጊዜው አልፏል። እባክዎ እንደገና ይግቡ (Session expired).' });
-      }
-
       const botToken = process.env.TELEGRAM_BOT_TOKEN || '8611581813:AAHadIUrYIkmVzz90WfvcpTduj-ubCZCL8w';
-      const secretKey = crypto.createHash('sha256').update(botToken).digest();
+      const botId = botToken.split(':')[0] || '8611581813';
 
-      // Official Telegram Login Widget data-check-string verification
-      const tgFields: string[] = [];
-      for (const [k, v] of Object.entries(payload)) {
-        if (k === 'hash' || v === undefined || v === null || String(v) === '') continue;
-        tgFields.push(`${k}=${String(v)}`);
+      let tgId = '';
+      let firstName = '';
+      let lastName = '';
+      let username = '';
+      let photoUrl = '';
+
+      if (payload.id_token && typeof payload.id_token === 'string') {
+        // Official Telegram OIDC ID Token flow (https://core.telegram.org/bots/telegram-login)
+        const claims = await verifyTelegramOidcIdToken(payload.id_token, botId);
+        tgId = String(claims.sub || claims.id || '');
+        if (!tgId) {
+          return res.status(401).json({ error: 'Telegram user ID missing in OIDC token' });
+        }
+        const fullName = String(claims.name || '').trim();
+        const nameParts = fullName ? fullName.split(/\s+/) : [];
+        firstName = String(claims.given_name || nameParts[0] || '');
+        lastName = String(claims.family_name || (nameParts.length > 1 ? nameParts.slice(1).join(' ') : ''));
+        username = String(claims.preferred_username || '');
+        photoUrl = String(claims.picture || '');
+      } else {
+        // Legacy Telegram Login Widget HMAC-SHA256 fallback
+        const { id, auth_date, hash, first_name, last_name, username: rawUsername, photo_url } = payload;
+
+        if (!id || !auth_date || !hash) {
+          return res.status(400).json({ error: 'Invalid Telegram authentication payload' });
+        }
+
+        const nowSec = Math.floor(Date.now() / 1000);
+        const authSec = Number(auth_date);
+        if (!Number.isFinite(authSec) || Math.abs(nowSec - authSec) > 86400) {
+          return res.status(401).json({ error: 'የቴሌግራም መግቢያ ጊዜው አልፏል። እባክዎ እንደገና ይግቡ (Session expired).' });
+        }
+
+        const secretKey = crypto.createHash('sha256').update(botToken).digest();
+        const tgFields: string[] = [];
+        for (const [k, v] of Object.entries(payload)) {
+          if (k === 'hash' || v === undefined || v === null || String(v) === '') continue;
+          tgFields.push(`${k}=${String(v)}`);
+        }
+        tgFields.sort();
+        const dataCheckString = tgFields.join('\n');
+        const expectedHex = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+        const receivedHex = String(hash).trim().toLowerCase();
+
+        const expectedBuf = Buffer.from(expectedHex, 'hex');
+        const receivedBuf = Buffer.from(receivedHex, 'hex');
+        const validSig =
+          expectedBuf.length === receivedBuf.length &&
+          expectedBuf.length > 0 &&
+          crypto.timingSafeEqual(expectedBuf, receivedBuf);
+
+        if (!validSig) {
+          return res.status(401).json({ error: 'የቴሌግራም ማረጋገጫ ፊርማ ትክክል አይደለም (Invalid Telegram signature).' });
+        }
+
+        tgId = String(id);
+        firstName = first_name ? String(first_name) : '';
+        lastName = last_name ? String(last_name) : '';
+        username = rawUsername ? String(rawUsername) : '';
+        photoUrl = photo_url ? String(photo_url) : '';
       }
-      tgFields.sort();
-      const dataCheckString = tgFields.join('\n');
-      const expectedHex = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
-      const receivedHex = String(hash).trim().toLowerCase();
 
-      const expectedBuf = Buffer.from(expectedHex, 'hex');
-      const receivedBuf = Buffer.from(receivedHex, 'hex');
-      const validSig =
-        expectedBuf.length === receivedBuf.length &&
-        expectedBuf.length > 0 &&
-        crypto.timingSafeEqual(expectedBuf, receivedBuf);
-
-      if (!validSig) {
-        return res.status(401).json({ error: 'የቴሌግራም ማረጋገጫ ፊርማ ትክክል አይደለም (Invalid Telegram signature).' });
-      }
-
-      const tgId = String(id);
       // Save subscriber metadata non-blocking
       db.collection('bot_subscribers').doc(tgId).set({
         telegramId: tgId,
-        username: username ? String(username) : '',
-        firstName: first_name ? String(first_name) : '',
-        lastName: last_name ? String(last_name) : '',
-        photoUrl: photo_url ? String(photo_url) : '',
+        username,
+        firstName,
+        lastName,
+        photoUrl,
         lastActiveAt: new Date().toISOString(),
       }, { merge: true }).catch(() => {});
 
@@ -1056,17 +1160,18 @@ async function startServer() {
         status: 'verified',
         telegramUser: {
           telegramId: tgId,
-          username: username ? String(username) : '',
-          firstName: first_name ? String(first_name) : '',
-          lastName: last_name ? String(last_name) : '',
-          photoUrl: photo_url ? String(photo_url) : '',
+          username,
+          firstName,
+          lastName,
+          photoUrl,
         },
         linkedChildren: Array.from(childMap.values()),
         linkRequests,
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error in /api/parent/auth/telegram-widget:', err);
-      return res.status(500).json({ error: 'Telegram verification failed' });
+      const msg = err?.message || 'Telegram verification failed';
+      return res.status(401).json({ error: msg });
     }
   });
 

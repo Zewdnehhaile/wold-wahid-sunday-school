@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   AttendanceRecord,
   Language,
@@ -75,9 +75,6 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({
   });
   const [isInitializingAuth, setIsInitializingAuth] = useState(false);
   const [authError, setAuthError] = useState('');
-  const [showDomainTip, setShowDomainTip] = useState(false);
-  const [widgetLoaded, setWidgetLoaded] = useState(false);
-  const widgetContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Parent linked children & requests
   const [linkedChildren, setLinkedChildren] = useState<Member[]>([]);
@@ -173,38 +170,16 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({
         }
       }
     } catch {}
-  }, []);
-
-  useEffect(() => {
-    if (telegramUser) return;
-    // Register global callback for official Telegram Login Widget
-    (window as any).onWoldWahidTelegramAuth = (user: any) => {
-      if (user && user.id && user.hash) {
-        verifyTelegramWidgetAuth(user);
-      }
-    };
-
-    const container = widgetContainerRef.current;
-    if (container) {
-      container.innerHTML = '';
+    // Load official Telegram OIDC Login library (matches verify.et flow)
+    const scriptId = 'telegram-oidc-login-sdk';
+    if (!document.getElementById(scriptId)) {
       const script = document.createElement('script');
-      script.src = 'https://telegram.org/js/telegram-widget.js?22';
+      script.id = scriptId;
+      script.src = 'https://oauth.telegram.org/js/telegram-login.js?6';
       script.async = true;
-      script.setAttribute('data-telegram-login', botInfo.botUsername);
-      script.setAttribute('data-size', 'large');
-      script.setAttribute('data-radius', '20');
-      script.setAttribute('data-onauth', 'onWoldWahidTelegramAuth(user)');
-      script.setAttribute('data-request-access', 'write');
-      script.onload = () => setWidgetLoaded(true);
-      container.appendChild(script);
+      document.head.appendChild(script);
     }
-
-    return () => {
-      try {
-        delete (window as any).onWoldWahidTelegramAuth;
-      } catch {}
-    };
-  }, [telegramUser, botInfo.botUsername]);
+  }, []);
 
   const refreshParentSession = async (tgId: string) => {
     setIsLoadingSession(true);
@@ -270,34 +245,80 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({
 
   const oauthDirectUrl =
     typeof window !== 'undefined'
-      ? `https://oauth.telegram.org/auth?bot_id=${encodeURIComponent(botInfo.botId)}&origin=${encodeURIComponent(
-          window.location.origin
-        )}&request_access=write&return_to=${encodeURIComponent(window.location.origin + '/?parent=1')}`
+      ? `https://oauth.telegram.org/auth?response_type=post_message&client_id=${encodeURIComponent(
+          botInfo.botId
+        )}&redirect_uri=${encodeURIComponent(
+          window.location.origin + window.location.pathname
+        )}&scope=${encodeURIComponent('openid profile telegram:bot_access')}`
       : '#';
+
+  const triggerTelegramOidc = () => {
+    const tgLogin = (window as any).Telegram?.Login;
+    if (!tgLogin || typeof tgLogin.auth !== 'function') {
+      return false;
+    }
+    setIsInitializingAuth(true);
+    try {
+      tgLogin.auth(
+        {
+          client_id: Number(botInfo.botId) || botInfo.botId,
+          scope: ['profile', 'write'],
+        },
+        (result: any) => {
+          setIsInitializingAuth(false);
+          if (!result || result.error) {
+            if (result?.error === 'popup_closed') {
+              setAuthError('የቴሌግራም መግቢያ ተቋርጧል። እባክዎ እንደገና ይሞክሩ።');
+            } else {
+              setAuthError(result?.error || 'የቴሌግራም ማረጋገጫ አልተጠናቀቀም።');
+            }
+            return;
+          }
+          if (result.id_token) {
+            verifyTelegramWidgetAuth({ id_token: result.id_token, user: result.user });
+          } else if (result.id && result.hash) {
+            verifyTelegramWidgetAuth(result);
+          } else {
+            setAuthError('የቴሌግራም ማረጋገጫ መረጃ አልተገኘም።');
+          }
+        }
+      );
+      return true;
+    } catch {
+      setIsInitializingAuth(false);
+      return false;
+    }
+  };
 
   const handleContinueWithTelegram = () => {
     setAuthError('');
-    const tgLogin = (window as any).Telegram?.Login;
-    if (tgLogin && typeof tgLogin.auth === 'function') {
-      setIsInitializingAuth(true);
-      try {
-        tgLogin.auth(
-          { bot_id: Number(botInfo.botId) || botInfo.botId, request_access: 'write' },
-          (user: any) => {
-            setIsInitializingAuth(false);
-            if (!user) {
-              setAuthError('የቴሌግራም ማረጋገጫ ተሰርዟል ወይም አልተጠናቀቀም።');
-              return;
-            }
-            verifyTelegramWidgetAuth(user);
-          }
-        );
-      } catch {
+    if (triggerTelegramOidc()) return;
+
+    // Ensure OIDC SDK is loaded if user clicks immediately
+    setIsInitializingAuth(true);
+    const existing = document.getElementById('telegram-oidc-login-sdk') as HTMLScriptElement | null;
+    const onSdkReady = () => {
+      if (!triggerTelegramOidc()) {
         setIsInitializingAuth(false);
         window.location.assign(oauthDirectUrl);
       }
+    };
+    if (existing) {
+      existing.addEventListener('load', onSdkReady, { once: true });
+      setTimeout(() => {
+        if ((window as any).Telegram?.Login?.auth) onSdkReady();
+      }, 400);
     } else {
-      window.location.assign(oauthDirectUrl);
+      const script = document.createElement('script');
+      script.id = 'telegram-oidc-login-sdk';
+      script.src = 'https://oauth.telegram.org/js/telegram-login.js?6';
+      script.async = true;
+      script.onload = onSdkReady;
+      script.onerror = () => {
+        setIsInitializingAuth(false);
+        window.location.assign(oauthDirectUrl);
+      };
+      document.head.appendChild(script);
     }
   };
 
@@ -499,26 +520,18 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({
                 <span>{isInitializingAuth ? 'በማረጋገጥ ላይ...' : 'Continue with Telegram'}</span>
               </button>
 
-              {/* Official Embedded Telegram Widget (renders Telegram iframe button when BotFather domain is active) */}
-              <div className="flex flex-col items-center justify-center min-h-[42px] pt-1">
-                <div ref={widgetContainerRef} className="flex justify-center" />
-                {!widgetLoaded && (
-                  <span className="text-[10px] text-emerald-200/50">Loading official Telegram widget...</span>
-                )}
-              </div>
-
               {authError && (
                 <p className="text-xs text-rose-300 bg-rose-950/60 border border-rose-500/40 rounded-xl p-3 text-center font-bold">
                   {authError}
                 </p>
               )}
 
-              <p className="text-[11px] text-emerald-200/70 leading-relaxed">
-                🔒 Telegram sends an official <strong className="text-white">Log in / Decline</strong> confirmation inside your Telegram app (Service Notifications).
+              <p className="text-[11px] text-emerald-200/70 leading-relaxed pt-1">
+                🔒 Telegram sends an official <strong className="text-white">Log in / Decline</strong> confirmation inside your Telegram app.
               </p>
             </div>
 
-            <div className="pt-2 border-t border-[#0f4425] space-y-2.5">
+            <div className="pt-2 border-t border-[#0f4425]">
               <button
                 type="button"
                 onClick={onBack}
@@ -526,29 +539,6 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({
               >
                 Return Home / ተመለስ
               </button>
-
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setShowDomainTip((v) => !v)}
-                  className="text-[10px] text-emerald-200/50 hover:text-emerald-200 underline cursor-pointer"
-                >
-                  {showDomainTip ? 'መመሪያ ደብቅ' : 'ለአድሚን: BotFather Domain (/setdomain) መረጃ'}
-                </button>
-                {showDomainTip && typeof window !== 'undefined' && (
-                  <div className="mt-2 p-3 rounded-xl bg-[#062414] border border-[#0f4425] text-[11px] text-left text-emerald-200/80 space-y-1">
-                    <p className="font-bold text-amber-300">Telegram OAuth Domain Requirement:</p>
-                    <p>
-                      Official Telegram Login (<code className="text-sky-300">oauth.telegram.org</code>) requires setting the active site domain in{' '}
-                      <strong className="text-white">@BotFather</strong> → <code className="text-amber-300">/setdomain</code> for{' '}
-                      <code className="text-sky-300">@{botInfo.botUsername}</code>:
-                    </p>
-                    <p className="font-mono text-[10px] bg-[#09351c] p-1.5 rounded text-amber-200 break-all">
-                      {window.location.hostname}
-                    </p>
-                  </div>
-                )}
-              </div>
             </div>
           </div>
         ) : (
