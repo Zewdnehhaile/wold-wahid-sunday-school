@@ -1,6 +1,6 @@
 // API Configuration for Wold Wahid Sunday School
 
-export const BACKEND_URL = 'https://ais-pre-reccyxuqfinpjq7hy5yle5-147288418331.europe-west2.run.app';
+export const BACKEND_URL = 'https://wold-wahid-sunday-school.onrender.com';
 
 export function getApiUrl(path: string): string {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
