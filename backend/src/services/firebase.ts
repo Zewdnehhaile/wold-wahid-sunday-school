@@ -173,6 +173,9 @@ export class CollectionQuery {
           if (op === '==' || op === '=') {
             return String(itemVal) === String(val) || itemVal === val;
           }
+          if (op === 'array-contains') {
+            return Array.isArray(itemVal) && itemVal.map(String).includes(String(val));
+          }
           if (op === 'in') {
             const arr = Array.isArray(val) ? val.map(String) : [];
             return arr.includes(String(itemVal)) || arr.includes(String(item.phone));

@@ -27,6 +27,9 @@ function getLogoDataUrl(): string {
   const candidates = [
     path.resolve(process.cwd(), 'public/assets/aistudio/image_6d91f294.png'),
     path.resolve(process.cwd(), 'dist/assets/aistudio/image_6d91f294.png'),
+    path.resolve(process.cwd(), '../public/assets/aistudio/image_6d91f294.png'),
+    path.resolve(process.cwd(), '../dist/assets/aistudio/image_6d91f294.png'),
+    path.resolve(__dirname, '../../../public/assets/aistudio/image_6d91f294.png'),
   ];
   for (const p of candidates) {
     if (fs.existsSync(p)) {
@@ -66,8 +69,14 @@ async function resolvePhotoDataUrl(photoUrl?: string, gender?: string): Promise<
 
   // Local public asset path
   if (raw.startsWith('/assets/')) {
-    const localPath = path.resolve(process.cwd(), 'public', raw.replace(/^\/+/, ''));
-    if (fs.existsSync(localPath)) {
+    const rel = raw.replace(/^\/+/, '');
+    const localCandidates = [
+      path.resolve(process.cwd(), 'public', rel),
+      path.resolve(process.cwd(), '../public', rel),
+      path.resolve(__dirname, '../../../public', rel),
+    ];
+    const localPath = localCandidates.find((p) => fs.existsSync(p));
+    if (localPath) {
       try {
         const ext = path.extname(localPath).toLowerCase() === '.png' ? 'png' : 'jpeg';
         const b64 = fs.readFileSync(localPath).toString('base64');

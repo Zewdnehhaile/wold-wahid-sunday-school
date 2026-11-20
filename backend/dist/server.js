@@ -44,15 +44,17 @@ const fs_1 = __importDefault(require("fs"));
 const crypto_1 = __importDefault(require("crypto"));
 const firebase_1 = require("./services/firebase");
 const bot_1 = require("./services/bot");
+const idCodes_1 = require("./utils/idCodes");
 dotenv.config();
 const app = (0, express_1.default)();
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
-// Cache-busting middleware: prevent stale browser caching of HTML & API responses
+// Cache-busting middleware + COOP allow-popups for Telegram OIDC Login popup
 app.use((req, res, next) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
     next();
 });
 // API Routes & Health Checks (UptimeRobot, Render, and monitoring)
@@ -114,26 +116,44 @@ app.post('/api/attendance', async (req, res) => {
         if (!memberCode) {
             return res.status(400).json({ error: 'memberCode is required' });
         }
-        const cleanCode = String(memberCode).trim().toUpperCase();
-        // Look up student details to enrich attendance record
+        const rawMemberCode = String(memberCode).trim();
+        const normCode = (0, idCodes_1.normalizeStudentCode)(rawMemberCode);
+        const upperCode = rawMemberCode.toUpperCase();
+        // Look up student details to enrich attendance record (supports EDU001, edu001, and legacy WW-2026 codes)
         let studentName = memberNameAm || memberNameEn || '';
         let studentDept = department || '';
         let studentTgId = '';
+        let resolvedCode = normCode || upperCode;
         try {
-            const [studentsSnap, regSnap] = await Promise.all([
-                firebase_1.db.collection('students').get(),
-                firebase_1.db.collection('registrations').get(),
-            ]);
-            const allDocs = [...studentsSnap.docs, ...regSnap.docs];
-            const foundDoc = allDocs.find(d => {
-                const dData = d.data();
-                const dCode = String(dData.code || dData.studentCode || '').trim().toUpperCase();
-                const dPhone = String(dData.phone || '').replace(/\D/g, '').slice(-9);
-                const codeDigits = cleanCode.replace(/\D/g, '').slice(-9);
-                return dCode === cleanCode || (codeDigits && dPhone && dPhone === codeDigits);
-            });
+            const codeDigits = rawMemberCode.replace(/\D/g, '');
+            let foundDoc = null;
+            const studentByCode = await firebase_1.db.collection('students').where('code', '==', normCode).limit(1).get();
+            if (!studentByCode.empty)
+                foundDoc = studentByCode.docs[0];
+            if (!foundDoc && upperCode !== normCode) {
+                const studentByRaw = await firebase_1.db.collection('students').where('code', '==', upperCode).limit(1).get();
+                if (!studentByRaw.empty)
+                    foundDoc = studentByRaw.docs[0];
+            }
+            if (!foundDoc) {
+                const studentByLegacy = await firebase_1.db.collection('students').where('legacyCode', '==', upperCode).limit(1).get();
+                if (!studentByLegacy.empty)
+                    foundDoc = studentByLegacy.docs[0];
+            }
+            if (!foundDoc && codeDigits.length >= 9) {
+                const last9 = codeDigits.slice(-9);
+                const studentByPhone = await firebase_1.db.collection('students').where('phone', '>=', '0' + last9).where('phone', '<=', '0' + last9 + '\uf8ff').limit(1).get();
+                if (!studentByPhone.empty)
+                    foundDoc = studentByPhone.docs[0];
+            }
+            if (!foundDoc) {
+                const regByCode = await firebase_1.db.collection('registrations').where('studentCode', '==', normCode).limit(1).get();
+                if (!regByCode.empty)
+                    foundDoc = regByCode.docs[0];
+            }
             if (foundDoc) {
                 const dData = foundDoc.data();
+                resolvedCode = dData.code || dData.studentCode || resolvedCode;
                 studentName = studentName || dData.fullNameAm || dData.fullNameEn || '';
                 studentDept = studentDept || dData.department || '';
                 studentTgId = dData.telegramId || dData.tgId || '';
@@ -142,6 +162,7 @@ app.post('/api/attendance', async (req, res) => {
         catch (e) {
             console.warn('Error resolving student for attendance:', e);
         }
+        const cleanCode = resolvedCode;
         const attendanceRecord = {
             memberCode: cleanCode,
             memberNameAm: studentName || 'ተማሪ',
@@ -211,29 +232,69 @@ app.post('/api/telegram/webhook', async (req, res) => {
         res.sendStatus(200);
     }
 });
-// Student Profile Lookup by ID or Phone
-// Student Profile Lookup by ID or Phone (handles students, registrations, and admins)
+// Student Support Tickets Lookup
+app.get('/api/students/:code/tickets', async (req, res) => {
+    try {
+        const code = Array.isArray(req.params.code) ? req.params.code[0] : req.params.code;
+        const snap = await firebase_1.db.collection('support_tickets')
+            .where('memberCode', '==', code)
+            .get();
+        if (snap.empty) {
+            const studentDoc = await firebase_1.db.collection('students').where('code', '==', code).get();
+            if (!studentDoc.empty) {
+                const phone = studentDoc.docs[0].data().phone;
+                const phoneSnap = await firebase_1.db.collection('support_tickets').where('phone', '==', phone).get();
+                return res.json(phoneSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+            }
+        }
+        res.json(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    }
+    catch (error) {
+        res.status(500).json({ error: 'Failed to fetch tickets' });
+    }
+});
+// Student Attendance History Lookup
+app.get('/api/students/:code/attendance', async (req, res) => {
+    try {
+        const code = Array.isArray(req.params.code) ? req.params.code[0] : req.params.code;
+        const snap = await firebase_1.db.collection('attendance')
+            .where('memberCode', '==', code)
+            .get();
+        const records = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        res.json(records.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()));
+    }
+    catch (error) {
+        res.status(500).json({ error: 'Failed to fetch attendance' });
+    }
+});
+// Student Profile Lookup by ID or Phone (Case-insensitive normalized code + legacyCode)
 app.get(['/api/students/:identifier', '/api/student/:identifier'], async (req, res) => {
     try {
-        const rawIdentifier = String(req.params.identifier || '').trim();
-        const identifierUpper = rawIdentifier.toUpperCase();
-        const cleanPhone = rawIdentifier.replace(/\D/g, '').slice(-9);
-        // 1. Search in students collection by code, studentCode, id, or phone
+        const identifierParam = Array.isArray(req.params.identifier) ? req.params.identifier[0] : req.params.identifier;
+        const cleanIdentifier = (identifierParam || '').trim();
+        const rawDigits = cleanIdentifier.replace(/\D/g, '');
+        const cleanPhone = rawDigits.length >= 9 ? rawDigits.slice(-9) : '';
+        const normCode = (0, idCodes_1.normalizeStudentCode)(cleanIdentifier);
+        const upperCode = cleanIdentifier.toUpperCase();
+        // 1. Search in students collection
         try {
             const studentsSnap = await firebase_1.db.collection('students').get();
-            for (const doc of studentsSnap.docs) {
-                const data = doc.data();
-                const docId = doc.id;
-                const code = String(data.code || data.studentCode || '').trim().toUpperCase();
-                const phone = String(data.phone || '').replace(/\D/g, '').slice(-9);
-                if (docId === rawIdentifier ||
-                    (code && code === identifierUpper) ||
-                    (cleanPhone && phone === cleanPhone)) {
+            for (const docSnap of studentsSnap.docs) {
+                const data = docSnap.data();
+                if (data?.status === 'deleted')
+                    continue;
+                const docId = docSnap.id;
+                const dCodeNorm = (0, idCodes_1.normalizeStudentCode)(data.code || data.studentCode || '');
+                const dLegacyNorm = (0, idCodes_1.normalizeStudentCode)(data.legacyCode || '');
+                const dPhone = (data.phone || '').replace(/\D/g, '').slice(-9);
+                if (docId === cleanIdentifier ||
+                    (normCode && (dCodeNorm === normCode || dLegacyNorm === normCode)) ||
+                    (cleanPhone && dPhone === cleanPhone)) {
                     return res.json({
                         id: docId,
-                        ...data,
-                        code: data.code || data.studentCode || code || identifierUpper,
+                        code: data.code || data.studentCode || upperCode,
                         role: data.role || 'student',
+                        ...data,
                     });
                 }
             }
@@ -241,20 +302,23 @@ app.get(['/api/students/:identifier', '/api/student/:identifier'], async (req, r
         catch (e) {
             console.warn('Error reading students collection:', e);
         }
-        // 2. Search in registrations collection by studentCode or phone
+        // 2. Search in registrations collection
         try {
             const regSnap = await firebase_1.db.collection('registrations').get();
-            for (const doc of regSnap.docs) {
-                const data = doc.data();
-                const code = String(data.studentCode || data.code || '').trim().toUpperCase();
-                const phone = String(data.phone || '').replace(/\D/g, '').slice(-9);
-                if ((code && code === identifierUpper) || (cleanPhone && phone === cleanPhone)) {
+            for (const docSnap of regSnap.docs) {
+                const data = docSnap.data();
+                if (data?.status === 'deleted')
+                    continue;
+                const dCodeNorm = (0, idCodes_1.normalizeStudentCode)(data.studentCode || data.code || '');
+                const dPhone = (data.phone || '').replace(/\D/g, '').slice(-9);
+                if ((normCode && dCodeNorm === normCode) ||
+                    (cleanPhone && dPhone === cleanPhone)) {
                     return res.json({
-                        id: doc.id,
-                        ...data,
-                        code: data.studentCode || data.code || identifierUpper,
+                        id: docSnap.id,
+                        code: data.studentCode || data.code || upperCode,
                         status: data.status || 'approved',
                         role: 'student',
+                        ...data,
                     });
                 }
             }
@@ -265,12 +329,12 @@ app.get(['/api/students/:identifier', '/api/student/:identifier'], async (req, r
         // 3. Search in admins collection as fallback
         try {
             const adminsSnap = await firebase_1.db.collection('admins').get();
-            for (const doc of adminsSnap.docs) {
-                const data = doc.data();
-                const adminPhone = String(data.phone || '').replace(/\D/g, '').slice(-9);
+            for (const docSnap of adminsSnap.docs) {
+                const data = docSnap.data();
+                const adminPhone = (data.phone || '').replace(/\D/g, '').slice(-9);
                 if (cleanPhone && adminPhone === cleanPhone) {
                     return res.json({
-                        id: doc.id,
+                        id: docSnap.id,
                         ...data,
                         role: data.role || 'admin',
                     });
@@ -361,6 +425,7 @@ app.post('/api/admins/login', async (req, res) => {
         }
         const cleanPhone = String(phone).replace(/\D/g, '').slice(-9);
         const cleanPass = String(password).trim();
+        const inputHash = crypto_1.default.createHash('sha256').update(cleanPass).digest('hex');
         // Check admins collection
         const adminsSnap = await firebase_1.db.collection('admins').get();
         for (const doc of adminsSnap.docs) {
@@ -371,7 +436,11 @@ app.post('/api/admins/login', async (req, res) => {
                     return res.status(403).json({ error: 'ይህ የአስተዳዳሪ አካውንት ታግዷል (Account is suspended)' });
                 }
                 const storedPassword = String(data.password || '').trim();
-                if (cleanPass !== storedPassword) {
+                const storedHash = String(data.passwordHash || '').trim();
+                const isMatch = (storedPassword && cleanPass === storedPassword) ||
+                    (storedHash && inputHash === storedHash) ||
+                    (storedPassword && inputHash === storedPassword);
+                if (!isMatch) {
                     return res.status(401).json({ error: 'የተሳሳተ የይለፍ ቃል (Incorrect admin password)' });
                 }
                 return res.json({
@@ -397,7 +466,11 @@ app.post('/api/admins/login', async (req, res) => {
             const sPhone = String(data.phone || '').replace(/\D/g, '').slice(-9);
             if (sPhone && cleanPhone && sPhone === cleanPhone && (data.role === 'admin' || data.role === 'super_admin')) {
                 const storedPassword = String(data.password || '').trim();
-                if (storedPassword && cleanPass !== storedPassword) {
+                const storedHash = String(data.passwordHash || '').trim();
+                const isMatch = (storedPassword && cleanPass === storedPassword) ||
+                    (storedHash && inputHash === storedHash) ||
+                    (storedPassword && inputHash === storedPassword);
+                if ((storedPassword || storedHash) && !isMatch) {
                     return res.status(401).json({ error: 'የተሳሳተ የይለፍ ቃል (Incorrect admin password)' });
                 }
                 return res.json({
@@ -415,7 +488,6 @@ app.post('/api/admins/login', async (req, res) => {
                 });
             }
         }
-        const inputHash = crypto_1.default.createHash('sha256').update(cleanPass).digest('hex');
         const fallbackAdmins = [
             { id: 'admin_01', nameAm: 'Neh Zewd (ዋና አስተዳዳሪ)', nameEn: 'Neh Zewd (Super Admin)', phone: '0988286610', password: 'Nehzewd0988', passwordHash: '329771a18bd2e6dd2d8d66f2b08e685093d2457a598cd2a4379a08a16f11ba06', role: 'super_admin' },
             { id: 'admin_02', nameAm: 'ዋና አስተዳዳሪ', nameEn: 'Main Admin', phone: '0911223344', password: 'admin', passwordHash: '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', role: 'super_admin' },
@@ -539,7 +611,7 @@ app.post('/api/admins/set-password', async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
-// Student Direct Login (Phone or StudentCode - No password required initially)
+// Student Direct Login (Phone or StudentCode - Case-insensitive EDU001 / legacy support)
 app.post('/api/students/login', async (req, res) => {
     try {
         const { identifier, phone, code } = req.body;
@@ -548,45 +620,72 @@ app.post('/api/students/login', async (req, res) => {
             return res.status(400).json({ error: 'Phone number or Student ID is required' });
         }
         const upperCode = rawInput.toUpperCase();
-        const cleanPhone = rawInput.replace(/\D/g, '').slice(-9);
-        // 1. Search in students collection
-        const studentsSnap = await firebase_1.db.collection('students').get();
-        for (const doc of studentsSnap.docs) {
-            const data = doc.data();
-            const dCode = String(data.code || data.studentCode || '').trim().toUpperCase();
-            const dPhone = String(data.phone || '').replace(/\D/g, '').slice(-9);
-            if (doc.id === rawInput ||
-                (dCode && dCode === upperCode) ||
-                (cleanPhone && dPhone && dPhone === cleanPhone)) {
+        const normCode = (0, idCodes_1.normalizeStudentCode)(rawInput);
+        const cleanPhone = rawInput.replace(/\D/g, '').length >= 9 ? rawInput.replace(/\D/g, '').slice(-9) : '';
+        const formats = cleanPhone ? [cleanPhone, '0' + cleanPhone, '+251' + cleanPhone] : [];
+        const studentById = await firebase_1.db.collection('students').doc(rawInput).get();
+        if (studentById.exists && studentById.data()?.status !== 'deleted') {
+            const data = studentById.data();
+            return res.json({
+                success: true,
+                student: { id: studentById.id, code: data.code || data.studentCode || normCode, role: 'student', ...data }
+            });
+        }
+        for (const candidateCode of Array.from(new Set([normCode, upperCode].filter(Boolean)))) {
+            const studentByCode = await firebase_1.db.collection('students').where('code', '==', candidateCode).limit(1).get();
+            if (!studentByCode.empty) {
+                const docSnap = studentByCode.docs[0];
+                const data = docSnap.data();
+                if (data?.status !== 'deleted') {
+                    return res.json({
+                        success: true,
+                        student: { id: docSnap.id, code: data.code || data.studentCode || candidateCode, role: 'student', ...data }
+                    });
+                }
+            }
+            const byLegacy = await firebase_1.db.collection('students').where('legacyCode', '==', candidateCode).limit(1).get();
+            if (!byLegacy.empty) {
+                const docSnap = byLegacy.docs[0];
+                const data = docSnap.data();
+                if (data?.status !== 'deleted') {
+                    return res.json({
+                        success: true,
+                        student: { id: docSnap.id, code: data.code || data.studentCode || candidateCode, role: 'student', ...data }
+                    });
+                }
+            }
+        }
+        if (cleanPhone) {
+            const studentByPhone = await firebase_1.db.collection('students').where('phone', 'in', formats).limit(1).get();
+            if (!studentByPhone.empty) {
+                const docSnap = studentByPhone.docs[0];
+                const data = docSnap.data();
                 return res.json({
                     success: true,
-                    student: {
-                        id: doc.id,
-                        code: data.code || data.studentCode || upperCode,
-                        role: 'student',
-                        ...data
-                    }
+                    student: { id: docSnap.id, code: data.code || data.studentCode || normCode, role: 'student', ...data }
                 });
             }
         }
         // 2. Search in registrations collection
-        const regSnap = await firebase_1.db.collection('registrations').get();
-        for (const doc of regSnap.docs) {
-            const data = doc.data();
-            const dCode = String(data.studentCode || data.code || '').trim().toUpperCase();
-            const dPhone = String(data.phone || '').replace(/\D/g, '').slice(-9);
-            if (doc.id === rawInput ||
-                (dCode && dCode === upperCode) ||
-                (cleanPhone && dPhone && dPhone === cleanPhone)) {
+        for (const candidateCode of Array.from(new Set([normCode, upperCode].filter(Boolean)))) {
+            const regByCode = await firebase_1.db.collection('registrations').where('studentCode', '==', candidateCode).limit(1).get();
+            if (!regByCode.empty) {
+                const docSnap = regByCode.docs[0];
+                const data = docSnap.data();
                 return res.json({
                     success: true,
-                    student: {
-                        id: doc.id,
-                        code: data.studentCode || data.code || upperCode,
-                        status: data.status || 'pending',
-                        role: 'student',
-                        ...data
-                    }
+                    student: { id: docSnap.id, code: data.studentCode || data.code || candidateCode, status: data.status || 'pending', role: 'student', ...data }
+                });
+            }
+        }
+        if (cleanPhone) {
+            const regByPhone = await firebase_1.db.collection('registrations').where('phone', 'in', formats).limit(1).get();
+            if (!regByPhone.empty) {
+                const docSnap = regByPhone.docs[0];
+                const data = docSnap.data();
+                return res.json({
+                    success: true,
+                    student: { id: docSnap.id, code: data.studentCode || data.code || normCode, status: data.status || 'pending', role: 'student', ...data }
                 });
             }
         }
@@ -597,40 +696,632 @@ app.post('/api/students/login', async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
-// Student Support Tickets Lookup
-app.get('/api/students/:code/tickets', async (req, res) => {
+// 1-Time Student Self-Edit After Approval (Phone & Birth Year -> Re-enters Admin Approval)
+app.post('/api/students/:id/self-edit', async (req, res) => {
     try {
-        const { code } = req.params;
-        const snap = await firebase_1.db.collection('support_tickets')
-            .where('memberCode', '==', code)
-            .get();
-        if (snap.empty) {
-            // Try by phone if code fails (some might not have code yet)
-            const studentDoc = await firebase_1.db.collection('students').where('code', '==', code).get();
-            if (!studentDoc.empty) {
-                const phone = studentDoc.docs[0].data().phone;
-                const phoneSnap = await firebase_1.db.collection('support_tickets').where('phone', '==', phone).get();
-                return res.json(phoneSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-            }
+        const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+        const { phone, birthYear } = req.body || {};
+        const studRef = firebase_1.db.collection('students').doc(id);
+        const regRef = firebase_1.db.collection('registrations').doc(id);
+        const [studSnap, regSnap] = await Promise.all([studRef.get(), regRef.get()]);
+        if (!studSnap.exists && !regSnap.exists) {
+            return res.status(404).json({ error: 'ተማሪው አልተገኘም (Student not found)' });
         }
-        res.json(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        const currentData = (studSnap.exists ? studSnap.data() : regSnap.data()) || {};
+        if (currentData.hasEditedProfileOnce) {
+            return res.status(403).json({
+                error: 'የመረጃ ማስተካከያ እድልዎን (1 ጊዜ) አስቀድመው ተጠቅመዋል። ተጨማሪ ለውጥ ካስፈለገ አስተዳዳሪን ያነጋግሩ።',
+            });
+        }
+        let cleanPhone = String(phone || currentData.phone || '').replace(/[\s\-\(\)\+]/g, '');
+        if (cleanPhone.startsWith('251'))
+            cleanPhone = '0' + cleanPhone.slice(3);
+        if (cleanPhone && (cleanPhone.length !== 10 || (!cleanPhone.startsWith('09') && !cleanPhone.startsWith('07')))) {
+            return res.status(400).json({
+                error: 'ስልክ ቁጥር በትክክል 10 አሃዝ መሆን አለበት እና በ 09 ወይም 07 መጀመር አለበት (ምሳሌ፡ 0911223344)',
+            });
+        }
+        const nextPhone = cleanPhone || currentData.phone || '';
+        const nextBirthYear = String(birthYear ?? currentData.birthYear ?? currentData.birthDate ?? '').trim();
+        const pendingEditSummary = {
+            oldPhone: currentData.phone || '',
+            newPhone: nextPhone,
+            oldBirthYear: currentData.birthYear || currentData.birthDate || '',
+            newBirthYear: nextBirthYear,
+            editedAt: new Date().toISOString(),
+        };
+        const patchStudent = {
+            phone: nextPhone,
+            birthYear: nextBirthYear,
+            birthDate: nextBirthYear,
+            hasEditedProfileOnce: true,
+            status: 'pending_approval',
+            pendingEditSummary,
+            updatedAt: new Date().toISOString(),
+        };
+        const patchReg = {
+            phone: nextPhone,
+            birthYear: nextBirthYear,
+            birthDate: nextBirthYear,
+            hasEditedProfileOnce: true,
+            status: 'pending',
+            pendingEditSummary,
+            updatedAt: new Date().toISOString(),
+        };
+        if (studSnap.exists) {
+            await studRef.update(patchStudent);
+        }
+        if (regSnap.exists) {
+            await regRef.update(patchReg);
+        }
+        return res.json({
+            success: true,
+            hasEditedProfileOnce: true,
+            status: 'pending_approval',
+            pendingEditSummary,
+            phone: nextPhone,
+            birthYear: nextBirthYear,
+        });
     }
-    catch (error) {
-        res.status(500).json({ error: 'Failed to fetch tickets' });
+    catch (err) {
+        console.error('Error in /api/students/:id/self-edit:', err);
+        return res.status(500).json({ error: 'መረጃውን ማዘመን አልተቻለም።' });
     }
 });
-// Student Attendance History Lookup
-app.get('/api/students/:code/attendance', async (req, res) => {
+// ─── IDEMPOTENT DEPARTMENT ID MIGRATION (WW-2026-... -> EDU001, MEZ001, ABN001, ART001, DIS001, GEN001) ───
+app.post('/api/admin/migrate-department-ids', async (req, res) => {
     try {
-        const { code } = req.params;
-        const snap = await firebase_1.db.collection('attendance')
-            .where('memberCode', '==', code)
-            .get();
-        const records = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        res.json(records.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()));
+        const force = Boolean(req.body?.force);
+        const markerRef = firebase_1.db.collection('app_settings').doc('id_migration_v1');
+        if (!force) {
+            const markerSnap = await markerRef.get();
+            if (markerSnap.exists && markerSnap.data()?.completed) {
+                return res.json({
+                    success: true,
+                    alreadyMigrated: true,
+                    migratedCount: 0,
+                    migratedAt: markerSnap.data()?.migratedAt,
+                });
+            }
+        }
+        const [studSnap, regSnap] = await Promise.all([
+            firebase_1.db.collection('students').limit(300).get(),
+            firebase_1.db.collection('registrations').limit(200).get(),
+        ]);
+        const prefixMax = { EDU: 0, MEZ: 0, ABN: 0, ART: 0, DIS: 0, GEN: 0 };
+        for (const d of studSnap.docs) {
+            const data = d.data();
+            if (data?.status === 'deleted')
+                continue;
+            const norm = (0, idCodes_1.normalizeStudentCode)(data.code || data.studentCode || '');
+            if ((0, idCodes_1.isDepartmentShortCode)(norm)) {
+                const prefix = norm.slice(0, 3);
+                const num = parseInt(norm.slice(3), 10);
+                if (!Number.isNaN(num) && num > (prefixMax[prefix] || 0)) {
+                    prefixMax[prefix] = num;
+                }
+            }
+        }
+        const codeMap = new Map();
+        const updates = [];
+        for (const d of studSnap.docs) {
+            const data = d.data();
+            if (!data || data.status === 'deleted' || data.status === 'rejected')
+                continue;
+            const currentRaw = String(data.code || data.studentCode || '').trim();
+            const currentNorm = (0, idCodes_1.normalizeStudentCode)(currentRaw);
+            if ((0, idCodes_1.isDepartmentShortCode)(currentNorm)) {
+                if (currentRaw !== currentNorm) {
+                    await firebase_1.db.collection('students').doc(d.id).update({ code: currentNorm, studentCode: currentNorm });
+                }
+                continue;
+            }
+            if (data.status !== 'active' && data.status !== 'approved' && currentNorm.startsWith('PENDING')) {
+                continue;
+            }
+            const deptKey = (0, idCodes_1.resolveDepartmentKey)(data.department);
+            const prefix = (0, idCodes_1.getDepartmentPrefix)(deptKey);
+            const nextNum = (prefixMax[prefix] || 0) + 1;
+            prefixMax[prefix] = nextNum;
+            const newCode = `${prefix}${String(nextNum).padStart(3, '0')}`;
+            await firebase_1.db.collection('students').doc(d.id).update({
+                code: newCode,
+                studentCode: newCode,
+                department: deptKey,
+                legacyCode: data.legacyCode || (currentRaw && !currentNorm.startsWith('PENDING') ? currentRaw : ''),
+                updatedAt: new Date().toISOString(),
+            });
+            if (currentRaw)
+                codeMap.set(currentNorm, newCode);
+            updates.push({ id: d.id, oldCode: currentRaw, newCode });
+            const matchingReg = regSnap.docs.find((r) => r.id === d.id);
+            if (matchingReg) {
+                await firebase_1.db.collection('registrations').doc(matchingReg.id).update({
+                    code: newCode,
+                    studentCode: newCode,
+                    department: deptKey,
+                    legacyCode: matchingReg.data()?.legacyCode || currentRaw,
+                    updatedAt: new Date().toISOString(),
+                }).catch(() => { });
+            }
+        }
+        for (const r of regSnap.docs) {
+            const rData = r.data();
+            if (!rData || (rData.status !== 'approved' && rData.status !== 'active'))
+                continue;
+            const currentRaw = String(rData.studentCode || rData.code || '').trim();
+            const currentNorm = (0, idCodes_1.normalizeStudentCode)(currentRaw);
+            if ((0, idCodes_1.isDepartmentShortCode)(currentNorm))
+                continue;
+            let mappedCode = codeMap.get(currentNorm);
+            if (!mappedCode) {
+                const deptKey = (0, idCodes_1.resolveDepartmentKey)(rData.department);
+                const prefix = (0, idCodes_1.getDepartmentPrefix)(deptKey);
+                const nextNum = (prefixMax[prefix] || 0) + 1;
+                prefixMax[prefix] = nextNum;
+                mappedCode = `${prefix}${String(nextNum).padStart(3, '0')}`;
+                if (currentRaw)
+                    codeMap.set(currentNorm, mappedCode);
+            }
+            await firebase_1.db.collection('registrations').doc(r.id).update({
+                code: mappedCode,
+                studentCode: mappedCode,
+                legacyCode: rData.legacyCode || currentRaw,
+                updatedAt: new Date().toISOString(),
+            }).catch(() => { });
+        }
+        if (codeMap.size > 0) {
+            try {
+                const attSnap = await firebase_1.db.collection('attendance').limit(300).get();
+                for (const a of attSnap.docs) {
+                    const aData = a.data();
+                    const normAtt = (0, idCodes_1.normalizeStudentCode)(aData.memberCode || aData.studentCode || '');
+                    const newCode = codeMap.get(normAtt);
+                    if (newCode && aData.memberCode !== newCode) {
+                        await firebase_1.db.collection('attendance').doc(a.id).update({
+                            memberCode: newCode,
+                            legacyMemberCode: aData.memberCode || '',
+                        }).catch(() => { });
+                    }
+                }
+            }
+            catch { }
+        }
+        const migratedAt = new Date().toISOString();
+        await markerRef.set({
+            completed: true,
+            migratedAt,
+            migratedCount: updates.length,
+        });
+        return res.json({
+            success: true,
+            alreadyMigrated: false,
+            migratedCount: updates.length,
+            updates,
+        });
     }
-    catch (error) {
-        res.status(500).json({ error: 'Failed to fetch attendance' });
+    catch (err) {
+        console.error('Migration error:', err);
+        return res.status(500).json({ error: 'Department ID migration failed' });
+    }
+});
+// ─── TELEGRAM WEB LOGIN (OFFICIAL WIDGET / VERIFY.ET FLOW) & PRIVATE PARENT PORTAL ROUTES ───
+let cachedBotInfo = null;
+app.get('/api/parent/auth/bot-info', async (req, res) => {
+    try {
+        const botToken = process.env.TELEGRAM_BOT_TOKEN || '8611581813:AAHadIUrYIkmVzz90WfvcpTduj-ubCZCL8w';
+        const botId = botToken.split(':')[0] || '8611581813';
+        if (!cachedBotInfo) {
+            let botUsername = process.env.TELEGRAM_BOT_USERNAME || 'attendanceforchurchbot';
+            let firstName = 'Wold Wahid Sunday School';
+            try {
+                const meRes = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+                const meData = await meRes.json();
+                if (meData?.ok && meData.result?.username) {
+                    botUsername = meData.result.username;
+                    firstName = meData.result.first_name || firstName;
+                }
+            }
+            catch { }
+            cachedBotInfo = { botId, botUsername, firstName };
+        }
+        return res.json({ success: true, ...cachedBotInfo });
+    }
+    catch (err) {
+        return res.status(500).json({ error: 'Failed to load Telegram bot configuration' });
+    }
+});
+let cachedTgJwks = null;
+async function fetchTelegramJwks(forceRefresh = false) {
+    if (!forceRefresh && cachedTgJwks && Date.now() - cachedTgJwks.fetchedAt < 3600_000) {
+        return cachedTgJwks.keys;
+    }
+    const resp = await fetch('https://oauth.telegram.org/.well-known/jwks.json');
+    const json = await resp.json();
+    const keys = Array.isArray(json?.keys) ? json.keys : [];
+    cachedTgJwks = { keys, fetchedAt: Date.now() };
+    return keys;
+}
+function decodeBase64UrlJson(segment) {
+    const norm = segment.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = norm.length % 4;
+    const padded = pad ? norm + '='.repeat(4 - pad) : norm;
+    return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+}
+function decodeBase64UrlBuffer(segment) {
+    const norm = segment.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = norm.length % 4;
+    const padded = pad ? norm + '='.repeat(4 - pad) : norm;
+    return Buffer.from(padded, 'base64');
+}
+async function verifyTelegramOidcIdToken(idToken, expectedAud) {
+    const parts = idToken.split('.');
+    if (parts.length !== 3) {
+        throw new Error('Malformed Telegram OIDC token');
+    }
+    const header = decodeBase64UrlJson(parts[0]);
+    const claims = decodeBase64UrlJson(parts[1]);
+    const sigBuf = decodeBase64UrlBuffer(parts[2]);
+    const signingInput = Buffer.from(`${parts[0]}.${parts[1]}`, 'utf8');
+    let keys = await fetchTelegramJwks(false);
+    let jwk = keys.find((k) => k.kid === header.kid);
+    if (!jwk) {
+        keys = await fetchTelegramJwks(true);
+        jwk = keys.find((k) => k.kid === header.kid);
+    }
+    if (!jwk) {
+        throw new Error('Matching Telegram signing key not found');
+    }
+    const publicKey = crypto_1.default.createPublicKey({ key: jwk, format: 'jwk' });
+    const alg = String(header.alg || jwk.alg || 'RS256');
+    let verified = false;
+    if (alg === 'RS256') {
+        verified = crypto_1.default.verify('sha256', signingInput, publicKey, sigBuf);
+    }
+    else if (alg === 'ES256' || alg === 'ES256K') {
+        verified = crypto_1.default.verify('sha256', signingInput, { key: publicKey, dsaEncoding: 'ieee-p1363' }, sigBuf);
+    }
+    else if (alg === 'EdDSA') {
+        verified = crypto_1.default.verify(null, signingInput, publicKey, sigBuf);
+    }
+    else {
+        throw new Error(`Unsupported JWT algorithm: ${alg}`);
+    }
+    if (!verified) {
+        throw new Error('Invalid Telegram OIDC token signature');
+    }
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (claims.iss !== 'https://oauth.telegram.org') {
+        throw new Error('Invalid Telegram OIDC issuer');
+    }
+    if (String(claims.aud || '') !== String(expectedAud)) {
+        throw new Error('Invalid Telegram OIDC audience');
+    }
+    if (!claims.exp || Number(claims.exp) + 60 < nowSec) {
+        throw new Error('Telegram OIDC session expired');
+    }
+    return claims;
+}
+app.post('/api/parent/auth/telegram-widget', async (req, res) => {
+    try {
+        const payload = req.body || {};
+        const botToken = process.env.TELEGRAM_BOT_TOKEN || '8611581813:AAHadIUrYIkmVzz90WfvcpTduj-ubCZCL8w';
+        const botId = botToken.split(':')[0] || '8611581813';
+        let tgId = '';
+        let firstName = '';
+        let lastName = '';
+        let username = '';
+        let photoUrl = '';
+        if (payload.id_token && typeof payload.id_token === 'string') {
+            const claims = await verifyTelegramOidcIdToken(payload.id_token, botId);
+            tgId = String(claims.sub || claims.id || '');
+            if (!tgId) {
+                return res.status(401).json({ error: 'Telegram user ID missing in OIDC token' });
+            }
+            const fullName = String(claims.name || '').trim();
+            const nameParts = fullName ? fullName.split(/\s+/) : [];
+            firstName = String(claims.given_name || nameParts[0] || '');
+            lastName = String(claims.family_name || (nameParts.length > 1 ? nameParts.slice(1).join(' ') : ''));
+            username = String(claims.preferred_username || '');
+            photoUrl = String(claims.picture || '');
+        }
+        else {
+            const { id, auth_date, hash, first_name, last_name, username: rawUsername, photo_url } = payload;
+            if (!id || !auth_date || !hash) {
+                return res.status(400).json({ error: 'Invalid Telegram authentication payload' });
+            }
+            const nowSec = Math.floor(Date.now() / 1000);
+            const authSec = Number(auth_date);
+            if (!Number.isFinite(authSec) || Math.abs(nowSec - authSec) > 86400) {
+                return res.status(401).json({ error: 'የቴሌግራም መግቢያ ጊዜው አልፏል። እባክዎ እንደገና ይግቡ (Session expired).' });
+            }
+            const secretKey = crypto_1.default.createHash('sha256').update(botToken).digest();
+            const tgFields = [];
+            for (const [k, v] of Object.entries(payload)) {
+                if (k === 'hash' || v === undefined || v === null || String(v) === '')
+                    continue;
+                tgFields.push(`${k}=${String(v)}`);
+            }
+            tgFields.sort();
+            const dataCheckString = tgFields.join('\n');
+            const expectedHex = crypto_1.default.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+            const receivedHex = String(hash).trim().toLowerCase();
+            const expectedBuf = Buffer.from(expectedHex, 'hex');
+            const receivedBuf = Buffer.from(receivedHex, 'hex');
+            const validSig = expectedBuf.length === receivedBuf.length &&
+                expectedBuf.length > 0 &&
+                crypto_1.default.timingSafeEqual(expectedBuf, receivedBuf);
+            if (!validSig) {
+                return res.status(401).json({ error: 'የቴሌግራም ማረጋገጫ ፊርማ ትክክል አይደለም (Invalid Telegram signature).' });
+            }
+            tgId = String(id);
+            firstName = first_name ? String(first_name) : '';
+            lastName = last_name ? String(last_name) : '';
+            username = rawUsername ? String(rawUsername) : '';
+            photoUrl = photo_url ? String(photo_url) : '';
+        }
+        firebase_1.db.collection('bot_subscribers').doc(tgId).set({
+            telegramId: tgId,
+            username,
+            firstName,
+            lastName,
+            photoUrl,
+            lastActiveAt: new Date().toISOString(),
+        }, { merge: true }).catch(() => { });
+        const [studByPrimary, studByArray, linksSnap] = await Promise.all([
+            firebase_1.db.collection('students').where('parentTelegramId', '==', tgId).limit(20).get(),
+            firebase_1.db.collection('students').where('parentTelegramIds', 'array-contains', tgId).limit(20).get(),
+            firebase_1.db.collection('parent_links').where('parentTelegramId', '==', tgId).limit(10).get(),
+        ]);
+        const childMap = new Map();
+        for (const d of [...studByPrimary.docs, ...studByArray.docs]) {
+            const sd = d.data();
+            if (sd?.status !== 'deleted')
+                childMap.set(d.id, { id: d.id, ...sd });
+        }
+        const linkRequests = linksSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        return res.json({
+            success: true,
+            status: 'verified',
+            telegramUser: {
+                telegramId: tgId,
+                username,
+                firstName,
+                lastName,
+                photoUrl,
+            },
+            linkedChildren: Array.from(childMap.values()),
+            linkRequests,
+        });
+    }
+    catch (err) {
+        console.error('Error in /api/parent/auth/telegram-widget:', err);
+        const msg = err?.message || 'Telegram verification failed';
+        return res.status(401).json({ error: msg });
+    }
+});
+app.post('/api/parent/auth/init', async (req, res) => {
+    try {
+        const token = crypto_1.default.randomBytes(12).toString('hex');
+        const createdAt = new Date().toISOString();
+        await firebase_1.db.collection('parent_login_tokens').doc(token).set({
+            token,
+            status: 'pending',
+            createdAt,
+        });
+        const deepLink = `https://t.me/attendanceforchurchbot?start=plogin_${token}`;
+        return res.json({ success: true, token, deepLink });
+    }
+    catch (err) {
+        console.error('Error in /api/parent/auth/init:', err);
+        return res.status(500).json({ error: 'Failed to initialize Telegram login' });
+    }
+});
+app.get('/api/parent/auth/status/:token', async (req, res) => {
+    try {
+        const token = Array.isArray(req.params.token) ? req.params.token[0] : req.params.token;
+        const snap = await firebase_1.db.collection('parent_login_tokens').doc(token).get();
+        if (!snap.exists) {
+            return res.status(404).json({ status: 'expired' });
+        }
+        const data = snap.data();
+        if (data.status !== 'verified' || !data.telegramId) {
+            return res.json({ status: 'pending' });
+        }
+        const tgId = String(data.telegramId);
+        const [studByPrimary, studByArray, linksSnap] = await Promise.all([
+            firebase_1.db.collection('students').where('parentTelegramId', '==', tgId).limit(20).get(),
+            firebase_1.db.collection('students').where('parentTelegramIds', 'array-contains', tgId).limit(20).get(),
+            firebase_1.db.collection('parent_links').where('parentTelegramId', '==', tgId).limit(10).get(),
+        ]);
+        const childMap = new Map();
+        for (const d of [...studByPrimary.docs, ...studByArray.docs]) {
+            const sd = d.data();
+            if (sd?.status !== 'deleted')
+                childMap.set(d.id, { id: d.id, ...sd });
+        }
+        const linkRequests = linksSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        return res.json({
+            status: 'verified',
+            telegramUser: {
+                telegramId: tgId,
+                username: data.telegramUsername || '',
+                firstName: data.firstName || '',
+                lastName: data.lastName || '',
+            },
+            linkedChildren: Array.from(childMap.values()),
+            linkRequests,
+        });
+    }
+    catch (err) {
+        console.error('Error in /api/parent/auth/status:', err);
+        return res.status(500).json({ error: 'Failed to check Telegram login status' });
+    }
+});
+app.get('/api/parent/session/:telegramId', async (req, res) => {
+    try {
+        const tgId = Array.isArray(req.params.telegramId) ? req.params.telegramId[0] : req.params.telegramId;
+        if (!tgId)
+            return res.status(400).json({ error: 'telegramId required' });
+        const [studByPrimary, studByArray, linksSnap] = await Promise.all([
+            firebase_1.db.collection('students').where('parentTelegramId', '==', String(tgId)).limit(20).get(),
+            firebase_1.db.collection('students').where('parentTelegramIds', 'array-contains', String(tgId)).limit(20).get(),
+            firebase_1.db.collection('parent_links').where('parentTelegramId', '==', String(tgId)).limit(10).get(),
+        ]);
+        const childMap = new Map();
+        for (const d of [...studByPrimary.docs, ...studByArray.docs]) {
+            const sd = d.data();
+            if (sd?.status !== 'deleted')
+                childMap.set(d.id, { id: d.id, ...sd });
+        }
+        const linkRequests = linksSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        return res.json({ success: true, linkedChildren: Array.from(childMap.values()), linkRequests });
+    }
+    catch (err) {
+        console.error('Error in /api/parent/session:', err);
+        return res.status(500).json({ error: 'Failed to load parent session' });
+    }
+});
+app.post('/api/parent/link-request', async (req, res) => {
+    try {
+        const { parentTelegramId, parentTelegramUsername, parentName, parentPhone, relation, studentCode } = req.body || {};
+        if (!parentTelegramId || !parentName || !parentPhone || !studentCode) {
+            return res.status(400).json({ error: 'እባክዎ ሁሉንም አስፈላጊ መረጃዎች (ስም፣ ስልክ እና የተማሪ ID) ይሙሉ።' });
+        }
+        const normInput = (0, idCodes_1.normalizeStudentCode)(studentCode);
+        const rawUpper = String(studentCode).trim().toUpperCase();
+        const studSnap = await firebase_1.db.collection('students').limit(300).get();
+        const matchedDoc = studSnap.docs.find((d) => {
+            const sd = d.data();
+            if (!sd || sd.status === 'deleted' || sd.status === 'rejected')
+                return false;
+            const cNorm = (0, idCodes_1.normalizeStudentCode)(sd.code || sd.studentCode || '');
+            const lNorm = (0, idCodes_1.normalizeStudentCode)(sd.legacyCode || '');
+            return cNorm === normInput || lNorm === normInput || cNorm === rawUpper;
+        });
+        if (!matchedDoc) {
+            return res.status(404).json({
+                error: `በመታወቂያ "${rawUpper}" የተመዘገበ ተማሪ አልተገኘም። እባክዎ የልጅዎን ትክክለኛ የመታወቂያ ኮድ (ምሳሌ፡ EDU001) ያስገቡ።`,
+            });
+        }
+        const sData = matchedDoc.data();
+        const tgStr = String(parentTelegramId);
+        const alreadyLinkedIds = Array.isArray(sData.parentTelegramIds) ? sData.parentTelegramIds.map(String) : [];
+        if (String(sData.parentTelegramId || '') === tgStr || alreadyLinkedIds.includes(tgStr)) {
+            return res.json({ success: true, alreadyLinked: true, studentNameAm: sData.fullNameAm });
+        }
+        const existingLinksSnap = await firebase_1.db.collection('parent_links')
+            .where('parentTelegramId', '==', tgStr)
+            .limit(10)
+            .get();
+        const dupPending = existingLinksSnap.docs.find((d) => {
+            const ld = d.data();
+            return ld.studentId === matchedDoc.id && ld.status === 'pending';
+        });
+        if (dupPending) {
+            return res.json({ success: true, alreadyPending: true, requestId: dupPending.id });
+        }
+        const cleanPhone = String(parentPhone).trim();
+        const added = await firebase_1.db.collection('parent_links').add({
+            parentTelegramId: tgStr,
+            parentTelegramUsername: parentTelegramUsername || '',
+            parentName: String(parentName).trim(),
+            parentPhone: cleanPhone,
+            relation: String(relation || 'ወላጅ (Parent)').trim(),
+            studentId: matchedDoc.id,
+            studentCode: sData.code || sData.studentCode || normInput,
+            studentNameAm: sData.fullNameAm || sData.fullNameEn || 'ተማሪ',
+            department: sData.department || 'education',
+            registeredEmergencyName: sData.emergencyContact?.name || sData.emergencyName || '',
+            registeredEmergencyPhone: sData.emergencyContact?.phone || sData.emergencyPhone || '',
+            status: 'pending',
+            createdAt: new Date().toISOString(),
+        });
+        return res.json({ success: true, id: added.id, status: 'pending' });
+    }
+    catch (err) {
+        console.error('Error in /api/parent/link-request:', err);
+        return res.status(500).json({ error: 'ጥያቄውን መላክ አልተቻለም።' });
+    }
+});
+app.get('/api/parent/child/:studentId', async (req, res) => {
+    try {
+        const studentId = Array.isArray(req.params.studentId) ? req.params.studentId[0] : req.params.studentId;
+        const parentTg = String(req.query.parentTelegramId || '').trim();
+        if (!parentTg)
+            return res.status(401).json({ error: 'Unauthorized: parentTelegramId required' });
+        const studDoc = await firebase_1.db.collection('students').doc(studentId).get();
+        if (!studDoc.exists)
+            return res.status(404).json({ error: 'Student not found' });
+        const sData = studDoc.data();
+        const allowedIds = Array.isArray(sData.parentTelegramIds) ? sData.parentTelegramIds.map(String) : [];
+        if (String(sData.parentTelegramId || '') !== parentTg && !allowedIds.includes(parentTg)) {
+            return res.status(403).json({ error: 'Access denied: this student is not linked to your parent account.' });
+        }
+        const [attSnap, reportDoc, notifSnap] = await Promise.all([
+            firebase_1.db.collection('attendance').where('memberId', '==', studentId).limit(30).get(),
+            firebase_1.db.collection('student_reports').doc(studentId).get(),
+            firebase_1.db.collection('notifications').limit(10).get(),
+        ]);
+        const attendance = attSnap.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+        const report = reportDoc.exists
+            ? reportDoc.data()
+            : { studentId, studentCode: sData.code || '', exams: [], conductNotes: [] };
+        const notices = notifSnap.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .filter((n) => !n.targetTelegramId || String(n.targetTelegramId) === String(sData.telegramId || '') || String(n.targetTelegramId) === parentTg)
+            .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+            .slice(0, 6);
+        return res.json({
+            success: true,
+            student: { id: studDoc.id, ...sData },
+            attendance,
+            report,
+            notices,
+        });
+    }
+    catch (err) {
+        console.error('Error in /api/parent/child:', err);
+        return res.status(500).json({ error: 'Failed to load child tracking data' });
+    }
+});
+app.post('/api/parent/leave-request', async (req, res) => {
+    try {
+        const { parentTelegramId, studentId, leaveType, duration, reason } = req.body || {};
+        if (!parentTelegramId || !studentId || !reason) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+        const studDoc = await firebase_1.db.collection('students').doc(String(studentId)).get();
+        if (!studDoc.exists)
+            return res.status(404).json({ error: 'Student not found' });
+        const sData = studDoc.data();
+        const allowedIds = Array.isArray(sData.parentTelegramIds) ? sData.parentTelegramIds.map(String) : [];
+        if (String(sData.parentTelegramId || '') !== String(parentTelegramId) && !allowedIds.includes(String(parentTelegramId))) {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+        const requestNumber = `PLV-${Math.floor(1000 + Math.random() * 9000)}`;
+        const payload = {
+            requestNumber,
+            memberId: studDoc.id,
+            studentName: sData.fullNameAm || sData.fullNameEn || 'ተማሪ',
+            studentCode: sData.code || sData.studentCode || '',
+            telegramId: sData.telegramId || String(parentTelegramId),
+            submittedByParent: true,
+            parentTelegramId: String(parentTelegramId),
+            leaveType: String(leaveType || 'የቤተሰብ (Family)'),
+            duration: String(duration || '1 ቀን'),
+            reason: String(reason).trim(),
+            status: 'pending',
+            submittedAt: new Date().toISOString(),
+        };
+        const ref = await firebase_1.db.collection('leave_requests').add(payload);
+        return res.json({ success: true, id: ref.id, requestNumber });
+    }
+    catch (err) {
+        console.error('Error in /api/parent/leave-request:', err);
+        return res.status(500).json({ error: 'Failed to submit leave request' });
     }
 });
 // Create Support Ticket from Mobile
@@ -1157,7 +1848,7 @@ app.use((req, res) => {
 });
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 10000;
 // Keep-alive mechanism to prevent instance from idling
-const externalUrl = process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://wold-wahid-sunday-school-app.vercel.app';
+const externalUrl = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || 'https://wold-wahid-sunday-school.onrender.com';
 setInterval(async () => {
     try {
         const pingUrl = externalUrl ? `${externalUrl.replace(/\/$/, '')}/api/health` : `http://localhost:${PORT}/api/health`;
