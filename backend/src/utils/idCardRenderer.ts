@@ -15,6 +15,9 @@ function getFontFiles(): string[] {
   const candidates = [
     '/usr/share/fonts/truetype/noto/NotoSansEthiopic-Regular.ttf',
     '/usr/share/fonts/truetype/noto/NotoSansEthiopic-Bold.ttf',
+    '/usr/share/fonts/truetype/noto/NotoSerifEthiopic-Regular.ttf',
+    '/usr/share/fonts/truetype/noto/NotoSerifEthiopic-Bold.ttf',
+    '/usr/share/fonts/truetype/freefont/FreeSerif.ttf',
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
   ];
