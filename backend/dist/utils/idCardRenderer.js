@@ -14,18 +14,37 @@ const CARD_HEIGHT = 638;
 let cachedLogoDataUrl = null;
 let cachedFontFiles = null;
 function getFontFiles() {
-    if (cachedFontFiles)
+    if (cachedFontFiles && cachedFontFiles.length > 0)
         return cachedFontFiles;
-    const candidates = [
-        '/usr/share/fonts/truetype/noto/NotoSansEthiopic-Regular.ttf',
-        '/usr/share/fonts/truetype/noto/NotoSansEthiopic-Bold.ttf',
-        '/usr/share/fonts/truetype/noto/NotoSerifEthiopic-Regular.ttf',
-        '/usr/share/fonts/truetype/noto/NotoSerifEthiopic-Bold.ttf',
-        '/usr/share/fonts/truetype/freefont/FreeSerif.ttf',
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+    const fontDirs = [
+        path_1.default.resolve(__dirname, '../../fonts'),
+        path_1.default.resolve(process.cwd(), 'fonts'),
+        path_1.default.resolve(process.cwd(), 'backend/fonts'),
+        path_1.default.resolve(__dirname, '../../../backend/fonts'),
     ];
-    cachedFontFiles = candidates.filter((p) => fs_1.default.existsSync(p));
+    const bundledNames = [
+        'NotoSansEthiopic-Regular.ttf',
+        'NotoSansEthiopic-Bold.ttf',
+        'DejaVuSans.ttf',
+        'DejaVuSans-Bold.ttf',
+    ];
+    const candidates = [];
+    for (const dir of fontDirs) {
+        for (const name of bundledNames) {
+            candidates.push(path_1.default.join(dir, name));
+        }
+    }
+    candidates.push('/usr/share/fonts/truetype/noto/NotoSansEthiopic-Regular.ttf', '/usr/share/fonts/truetype/noto/NotoSansEthiopic-Bold.ttf', '/usr/share/fonts/truetype/noto/NotoSerifEthiopic-Regular.ttf', '/usr/share/fonts/truetype/noto/NotoSerifEthiopic-Bold.ttf', '/usr/share/fonts/truetype/freefont/FreeSerif.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf');
+    const seen = new Set();
+    const resolved = [];
+    for (const p of candidates) {
+        const fileName = path_1.default.basename(p);
+        if (!seen.has(fileName) && fs_1.default.existsSync(p)) {
+            seen.add(fileName);
+            resolved.push(p);
+        }
+    }
+    cachedFontFiles = resolved;
     return cachedFontFiles;
 }
 function getLogoDataUrl() {

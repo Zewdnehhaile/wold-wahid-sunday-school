@@ -11,8 +11,26 @@ let cachedLogoDataUrl: string | null = null;
 let cachedFontFiles: string[] | null = null;
 
 function getFontFiles(): string[] {
-  if (cachedFontFiles) return cachedFontFiles;
-  const candidates = [
+  if (cachedFontFiles && cachedFontFiles.length > 0) return cachedFontFiles;
+  const fontDirs = [
+    path.resolve(__dirname, '../../fonts'),
+    path.resolve(process.cwd(), 'fonts'),
+    path.resolve(process.cwd(), 'backend/fonts'),
+    path.resolve(__dirname, '../../../backend/fonts'),
+  ];
+  const bundledNames = [
+    'NotoSansEthiopic-Regular.ttf',
+    'NotoSansEthiopic-Bold.ttf',
+    'DejaVuSans.ttf',
+    'DejaVuSans-Bold.ttf',
+  ];
+  const candidates: string[] = [];
+  for (const dir of fontDirs) {
+    for (const name of bundledNames) {
+      candidates.push(path.join(dir, name));
+    }
+  }
+  candidates.push(
     '/usr/share/fonts/truetype/noto/NotoSansEthiopic-Regular.ttf',
     '/usr/share/fonts/truetype/noto/NotoSansEthiopic-Bold.ttf',
     '/usr/share/fonts/truetype/noto/NotoSerifEthiopic-Regular.ttf',
@@ -20,8 +38,17 @@ function getFontFiles(): string[] {
     '/usr/share/fonts/truetype/freefont/FreeSerif.ttf',
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-  ];
-  cachedFontFiles = candidates.filter((p) => fs.existsSync(p));
+  );
+  const seen = new Set<string>();
+  const resolved: string[] = [];
+  for (const p of candidates) {
+    const fileName = path.basename(p);
+    if (!seen.has(fileName) && fs.existsSync(p)) {
+      seen.add(fileName);
+      resolved.push(p);
+    }
+  }
+  cachedFontFiles = resolved;
   return cachedFontFiles;
 }
 

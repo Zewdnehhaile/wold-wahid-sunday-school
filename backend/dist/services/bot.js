@@ -48,6 +48,7 @@ exports.getBot = getBot;
 const firebase_1 = require("./firebase");
 const ethiopianCalendar_1 = require("../utils/ethiopianCalendar");
 const idCardRenderer_1 = require("../utils/idCardRenderer");
+const idCodes_1 = require("../utils/idCodes");
 const qrcode_1 = __importDefault(require("qrcode"));
 const dotenv = __importStar(require("dotenv"));
 dotenv.config();
@@ -303,21 +304,19 @@ async function findUserRegistrationOrStudent(telegramId, username) {
     try {
         const snap = await firebase_1.db.collection('students')
             .where('telegramId', '==', tgStr)
-            .limit(5)
+            .limit(20)
             .get();
         const validStuds = snap.docs.filter((d) => d.data()?.status !== 'deleted');
         if (validStuds.length > 0) {
-            allCandidates.push({ type: 'student', data: { id: validStuds[0].id, ...validStuds[0].data() } });
+            validStuds.forEach((d) => allCandidates.push({ type: 'student', data: { id: d.id, ...d.data() } }));
         }
         else if (username) {
             const userSnap = await firebase_1.db.collection('students')
                 .where('telegramUsername', '==', username)
-                .limit(5)
+                .limit(20)
                 .get();
             const validUserStuds = userSnap.docs.filter((d) => d.data()?.status !== 'deleted');
-            if (validUserStuds.length > 0) {
-                allCandidates.push({ type: 'student', data: { id: validUserStuds[0].id, ...validUserStuds[0].data() } });
-            }
+            validUserStuds.forEach((d) => allCandidates.push({ type: 'student', data: { id: d.id, ...d.data() } }));
         }
     }
     catch (e) {
@@ -327,21 +326,19 @@ async function findUserRegistrationOrStudent(telegramId, username) {
     try {
         const snap = await firebase_1.db.collection('registrations')
             .where('telegramId', '==', tgStr)
-            .limit(5)
+            .limit(20)
             .get();
         const validRegs = snap.docs.filter((d) => d.data()?.status !== 'deleted');
         if (validRegs.length > 0) {
-            allCandidates.push({ type: 'registration', data: { id: validRegs[0].id, ...validRegs[0].data() } });
+            validRegs.forEach((d) => allCandidates.push({ type: 'registration', data: { id: d.id, ...d.data() } }));
         }
         else if (username) {
             const userSnap = await firebase_1.db.collection('registrations')
                 .where('telegramUsername', '==', username)
-                .limit(5)
+                .limit(20)
                 .get();
             const validUserRegs = userSnap.docs.filter((d) => d.data()?.status !== 'deleted');
-            if (validUserRegs.length > 0) {
-                allCandidates.push({ type: 'registration', data: { id: validUserRegs[0].id, ...validUserRegs[0].data() } });
-            }
+            validUserRegs.forEach((d) => allCandidates.push({ type: 'registration', data: { id: d.id, ...d.data() } }));
         }
     }
     catch (e) {
@@ -756,7 +753,7 @@ async function handleTelegramUpdateInner(update) {
                             phone: session.data.emergencyPhone || '',
                             relation: 'ቤተሰብ / Family'
                         },
-                        department: session.data.department,
+                        department: (0, idCodes_1.resolveDepartmentKey)(session.data.department),
                         photoUrl: session.data.photo && String(session.data.photo).toLowerCase() !== 'none' ? session.data.photo : '',
                         status: 'pending',
                         telegramId: String(telegramId),
@@ -873,7 +870,7 @@ async function handleTelegramUpdateInner(update) {
                 else if (field === 'department') {
                     if (!text)
                         return;
-                    patch.department = text;
+                    patch.department = (0, idCodes_1.resolveDepartmentKey)(text);
                 }
                 else if (field === 'photo') {
                     let photoVal = '';
@@ -899,12 +896,52 @@ async function handleTelegramUpdateInner(update) {
                     patch.photoUrl = photoVal;
                 }
                 if (isApprovedEdit) {
+                    const fieldLabels = {
+                        fullName: 'ሙሉ ስም',
+                        christianName: 'የክርስትና ስም',
+                        gender: 'ጾታ',
+                        birthDate: 'የትውልድ ዘመን',
+                        phone: 'ስልክ',
+                        address: 'አድራሻ',
+                        emergencyName: 'የተጠሪ ስም',
+                        emergencyPhone: 'የተጠሪ ስልክ',
+                        department: 'ክፍል',
+                        photo: 'ፎቶ',
+                    };
+                    const oldValMap = {
+                        fullName: currentData.fullNameAm || currentData.fullNameEn || '',
+                        christianName: currentData.christianName || '',
+                        gender: currentData.gender || '',
+                        birthDate: currentData.birthYear || currentData.birthDate || '',
+                        phone: currentData.phone || '',
+                        address: currentData.address || currentData.subcity || '',
+                        emergencyName: currentData.emergencyContact?.name || currentData.emergencyName || '',
+                        emergencyPhone: currentData.emergencyContact?.phone || currentData.emergencyPhone || '',
+                        department: currentData.department || '',
+                        photo: currentData.photoUrl ? 'ነባር ፎቶ' : 'የለም',
+                    };
+                    const newValMap = {
+                        fullName: patch.fullNameAm || '',
+                        christianName: patch.christianName || '',
+                        gender: patch.gender || '',
+                        birthDate: patch.birthYear || patch.birthDate || '',
+                        phone: patch.phone || '',
+                        address: patch.address || '',
+                        emergencyName: patch.emergencyName || '',
+                        emergencyPhone: patch.emergencyPhone || '',
+                        department: patch.department || '',
+                        photo: patch.photoUrl ? 'አዲስ ፎቶ ተልኳል' : 'ተሰርዟል',
+                    };
                     patch.hasEditedProfileOnce = true;
                     patch.pendingEditSummary = {
                         oldPhone: currentData.phone || '',
                         newPhone: patch.phone || currentData.phone || '',
                         oldBirthYear: currentData.birthYear || currentData.birthDate || '',
                         newBirthYear: patch.birthYear || currentData.birthYear || currentData.birthDate || '',
+                        editedField: field,
+                        editedFieldLabel: fieldLabels[field] || field,
+                        oldValue: oldValMap[field] || '',
+                        newValue: newValMap[field] || '',
                         editedAt: new Date().toISOString(),
                     };
                     patch.status = targetCol === 'students' ? 'pending_approval' : 'pending';
@@ -934,7 +971,7 @@ async function handleTelegramUpdateInner(update) {
                     `8. ተጠሪ ስልክ: ${u.emergencyContact?.phone || u.emergencyPhone || 'N/A'}\n` +
                     `9. ክፍል: ${u.department || 'N/A'}\n\n` +
                     (isApprovedEdit
-                        ? `⏳ የስልክ/የትውልድ ዘመን ለውጥዎ ወደ አስተዳዳሪ ማረጋገጫ ተልኳል።`
+                        ? `⏳ የመረጃ ለውጥዎ ወደ አስተዳዳሪ ማረጋገጫ ተልኳል።`
                         : `ዋናው ማውጫ ከታች ተመልሷል።`), exports.mainMenuKeyboard);
                 if (!isApprovedEdit) {
                     await dispatchSendMessage(chatId, '✏️ ሌላ መረጃ ማስተካከል ከፈለጉ ከታች ያለውን ቁልፍ ይጫኑ፦', {
@@ -1495,56 +1532,45 @@ async function sendEditFieldMenu(chatId, telegramId, username) {
     }
     const reg = match.data;
     const isApproved = reg.status === 'approved' || reg.status === 'active';
-    if (isApproved) {
-        if (reg.hasEditedProfileOnce) {
-            await dispatchSendMessage(chatId, '⚠️ የመረጃ ማስተካከያ እድልዎን (1 ጊዜ) አስቀድመው ተጠቅመዋል። ተጨማሪ ለውጥ ካስፈለገ *"💬 ድጋፍና እርዳታ"* በመጫን አስተዳዳሪን ያነጋግሩ።', exports.mainMenuKeyboard);
-            return;
-        }
-        await dispatchSendMessage(chatId, `✏️ *የጸደቀ መገለጫ ማስተካከያ (1-Time Self-Edit)*\n` +
-            `🆔 *መታወቂያ:* \`${reg.studentCode || reg.code || ''}\`\n\n` +
-            `ከጸደቀ በኋላ *ስልክ ቁጥር* ወይም *የትውልድ ዘመን* (1 ጊዜ ብቻ) ማስተካከል ይችላሉ፤ ለውጡ በአስተዳዳሪ ዳግም ይጸድቃል።\n` +
-            `የቱን ማስተካከል ይፈልጋሉ?`, {
-            parse_mode: 'Markdown',
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        { text: '📱 ስልክ ቁጥር (Phone)', callback_data: 'edit_field:phone' },
-                        { text: '📅 የትውልድ ዘመን (Birth Year)', callback_data: 'edit_field:birthDate' },
-                    ],
-                ],
-            },
-        });
-        return;
+    const editKeyboardRows = [
+        [
+            { text: '👤 ሙሉ ስም', callback_data: 'edit_field:fullName' },
+            { text: '✝️ የክርስትና ስም', callback_data: 'edit_field:christianName' },
+        ],
+        [
+            { text: '⚧ ጾታ', callback_data: 'edit_field:gender' },
+            { text: '📅 የትውልድ ዘመን', callback_data: 'edit_field:birthDate' },
+        ],
+        [
+            { text: '📱 ስልክ ቁጥር', callback_data: 'edit_field:phone' },
+            { text: '📍 አድራሻ', callback_data: 'edit_field:address' },
+        ],
+        [
+            { text: '🛡️ የተጠሪ ስም', callback_data: 'edit_field:emergencyName' },
+            { text: '📞 የተጠሪ ስልክ', callback_data: 'edit_field:emergencyPhone' },
+        ],
+        [
+            { text: '⛪ ክፍል (Dept)', callback_data: 'edit_field:department' },
+            { text: '📸 ፎቶ (Photo)', callback_data: 'edit_field:photo' },
+        ],
+    ];
+    if (!isApproved) {
+        editKeyboardRows.push([{ text: '🔄 ሁሉንም 10 ደረጃዎች እንደገና ሙላ', callback_data: 'edit_field:redo_all' }]);
     }
-    await dispatchSendMessage(chatId, `✏️ *የምዝገባ መረጃ ማስተካከያ (Edit Registration)*\n` +
-        `👤 *ስም:* ${reg.fullNameAm || reg.fullNameEn || 'ተማሪ'}\n` +
-        `📱 *ስልክ:* ${reg.phone || 'N/A'}\n\n` +
-        `ማስተካከል የሚፈልጉትን መረጃ ከታች ይምረጡ፦`, {
+    const headerNote = isApproved
+        ? `✏️ *የተማሪ መረጃ ማስተካከያ (Edit Profile)*\n` +
+            `🆔 *መታወቂያ:* \`${reg.studentCode || reg.code || ''}\`\n` +
+            `👤 *ስም:* ${reg.fullNameAm || reg.fullNameEn || 'ተማሪ'}\n` +
+            `📱 *ስልክ:* ${reg.phone || 'N/A'}\n\n` +
+            `ማስተካከል የሚፈልጉትን መረጃ ከታች ይምረጡ (ለውጡ በአስተዳዳሪ ዳግም ይጸድቃል)፦`
+        : `✏️ *የምዝገባ መረጃ ማስተካከያ (Edit Registration)*\n` +
+            `👤 *ስም:* ${reg.fullNameAm || reg.fullNameEn || 'ተማሪ'}\n` +
+            `📱 *ስልክ:* ${reg.phone || 'N/A'}\n\n` +
+            `ማስተካከል የሚፈልጉትን መረጃ ከታች ይምረጡ፦`;
+    await dispatchSendMessage(chatId, headerNote, {
         parse_mode: 'Markdown',
         reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: '👤 ሙሉ ስም', callback_data: 'edit_field:fullName' },
-                    { text: '✝️ የክርስትና ስም', callback_data: 'edit_field:christianName' },
-                ],
-                [
-                    { text: '⚧ ጾታ', callback_data: 'edit_field:gender' },
-                    { text: '📅 የትውልድ ዘመን', callback_data: 'edit_field:birthDate' },
-                ],
-                [
-                    { text: '📱 ስልክ ቁጥር', callback_data: 'edit_field:phone' },
-                    { text: '📍 አድራሻ', callback_data: 'edit_field:address' },
-                ],
-                [
-                    { text: '🛡️ የተጠሪ ስም', callback_data: 'edit_field:emergencyName' },
-                    { text: '📞 የተጠሪ ስልክ', callback_data: 'edit_field:emergencyPhone' },
-                ],
-                [
-                    { text: '⛪ ክፍል (Dept)', callback_data: 'edit_field:department' },
-                    { text: '📸 ፎቶ (Photo)', callback_data: 'edit_field:photo' },
-                ],
-                [{ text: '🔄 ሁሉንም 10 ደረጃዎች እንደገና ሙላ', callback_data: 'edit_field:redo_all' }],
-            ],
+            inline_keyboard: editKeyboardRows,
         },
     });
 }
@@ -1561,16 +1587,6 @@ async function startFieldEditPrompt(chatId, telegramId, username, field) {
         await setSession(telegramId, { action: 'register', step: 'name', data: {} });
         await dispatchSendMessage(chatId, '📝 *የተማሪ ምዝገባ (Step 1/10)*\nእባክዎ አዲሱን ሙሉ ስምዎን ያስገቡ፦', exports.cancelKeyboard);
         return;
-    }
-    if (isApproved) {
-        if (reg.hasEditedProfileOnce) {
-            await dispatchSendMessage(chatId, '⚠️ የ1 ጊዜ ማስተካከያ እድልዎን አስቀድመው ተጠቅመዋል።', exports.mainMenuKeyboard);
-            return;
-        }
-        if (field !== 'phone' && field !== 'birthDate') {
-            await dispatchSendMessage(chatId, '⚠️ ከጸደቀ በኋላ ስልክ ቁጥር ወይም የትውልድ ዘመን ብቻ ማስተካከል ይቻላል።', exports.mainMenuKeyboard);
-            return;
-        }
     }
     await setSession(telegramId, {
         action: 'edit',

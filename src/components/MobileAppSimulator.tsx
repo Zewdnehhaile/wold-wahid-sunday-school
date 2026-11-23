@@ -38,22 +38,22 @@ export const MobileAppSimulator: React.FC<MobileAppSimulatorProps> = ({
   
   const [selectedMember, setSelectedMember] = useState<Member>(() => {
     return members.find((m) => m.status === 'active') || members[0] || {
-      id: 'm-default',
-      code: 'WW-2026-0101',
-      fullNameAm: 'ዮሐንስ ተስፋዬ ገብረመድህን',
-      fullNameEn: 'Yohannes Tesfaye Gebremedhin',
-      phone: '0911234567',
+      id: '',
+      code: '—',
+      fullNameAm: 'ተማሪ አልተመረጠም',
+      fullNameEn: 'No student selected',
+      phone: '—',
       gender: 'male',
       department: 'education',
       gradeLevel: 'grade_3_5',
       roleAm: 'ተማሪ / Student',
       roleEn: 'Student',
       photoUrl: AVATAR_MALE,
-      registeredDate: '2026-01-15',
+      registeredDate: '',
       bloodGroup: 'O+',
-      emergencyContact: { name: 'አቶ ተስፋዬ', phone: '0911000000', relation: 'አባት' },
-      subcity: 'ቦሌ / Bole',
-      status: 'active',
+      emergencyContact: { name: '—', phone: '—', relation: 'ቤተሰብ' },
+      subcity: '—',
+      status: 'pending_approval',
       consecutiveAbsences: 0,
     };
   });

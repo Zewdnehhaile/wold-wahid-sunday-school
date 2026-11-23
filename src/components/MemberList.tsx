@@ -522,6 +522,11 @@ export const MemberList: React.FC<MemberListProps> = ({
                                   🎂 {member.pendingEditSummary.oldBirthYear || '—'} → <span className="text-amber-300 font-bold">{member.pendingEditSummary.newBirthYear}</span>
                                 </p>
                               )}
+                              {member.pendingEditSummary.editedFieldLabel && member.pendingEditSummary.editedField !== 'phone' && member.pendingEditSummary.editedField !== 'birthDate' && (
+                                <p className="font-mono">
+                                  ✏️ {member.pendingEditSummary.editedFieldLabel}: {member.pendingEditSummary.oldValue || '—'} → <span className="text-amber-300 font-bold">{member.pendingEditSummary.newValue || '—'}</span>
+                                </p>
+                              )}
                             </div>
                           )}
                         </div>
@@ -684,6 +689,11 @@ export const MemberList: React.FC<MemberListProps> = ({
                       የትውልድ ዘመን፦ {approvingMember.pendingEditSummary.oldBirthYear || '—'} → <span className="text-amber-300 font-bold">{approvingMember.pendingEditSummary.newBirthYear}</span>
                     </p>
                   )}
+                  {approvingMember.pendingEditSummary.editedFieldLabel && approvingMember.pendingEditSummary.editedField !== 'phone' && approvingMember.pendingEditSummary.editedField !== 'birthDate' && (
+                    <p className="text-slate-200 font-mono text-[11px]">
+                      {approvingMember.pendingEditSummary.editedFieldLabel}፦ {approvingMember.pendingEditSummary.oldValue || '—'} → <span className="text-amber-300 font-bold">{approvingMember.pendingEditSummary.newValue || '—'}</span>
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -785,6 +795,11 @@ export const MemberList: React.FC<MemberListProps> = ({
                   {selectedMember.pendingEditSummary.oldBirthYear !== selectedMember.pendingEditSummary.newBirthYear && (
                     <p className="text-slate-200 font-mono">
                       <strong>የትውልድ ዘመን፦</strong> {selectedMember.pendingEditSummary.oldBirthYear || '—'} → <span className="text-amber-300 font-bold">{selectedMember.pendingEditSummary.newBirthYear}</span>
+                    </p>
+                  )}
+                  {selectedMember.pendingEditSummary.editedFieldLabel && selectedMember.pendingEditSummary.editedField !== 'phone' && selectedMember.pendingEditSummary.editedField !== 'birthDate' && (
+                    <p className="text-slate-200 font-mono">
+                      <strong>{selectedMember.pendingEditSummary.editedFieldLabel}፦</strong> {selectedMember.pendingEditSummary.oldValue || '—'} → <span className="text-amber-300 font-bold">{selectedMember.pendingEditSummary.newValue || '—'}</span>
                     </p>
                   )}
                 </div>

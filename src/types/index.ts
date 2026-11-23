@@ -67,6 +67,10 @@ export interface PendingEditSummary {
   newPhone?: string;
   oldBirthYear?: string;
   newBirthYear?: string;
+  editedField?: string;
+  editedFieldLabel?: string;
+  oldValue?: string;
+  newValue?: string;
   editedAt: string;
 }
 

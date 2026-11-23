@@ -656,36 +656,36 @@ app.post('/api/students/login', async (req, res) => {
             }
         }
         if (cleanPhone) {
-            const studentByPhone = await firebase_1.db.collection('students').where('phone', 'in', formats).limit(1).get();
-            if (!studentByPhone.empty) {
-                const docSnap = studentByPhone.docs[0];
-                const data = docSnap.data();
+            const studentByPhone = await firebase_1.db.collection('students').where('phone', 'in', formats).limit(5).get();
+            const validDoc = studentByPhone.docs.find((d) => d.data()?.status !== 'deleted');
+            if (validDoc) {
+                const data = validDoc.data();
                 return res.json({
                     success: true,
-                    student: { id: docSnap.id, code: data.code || data.studentCode || normCode, role: 'student', ...data }
+                    student: { id: validDoc.id, code: data.code || data.studentCode || normCode, role: 'student', ...data }
                 });
             }
         }
         // 2. Search in registrations collection
         for (const candidateCode of Array.from(new Set([normCode, upperCode].filter(Boolean)))) {
-            const regByCode = await firebase_1.db.collection('registrations').where('studentCode', '==', candidateCode).limit(1).get();
-            if (!regByCode.empty) {
-                const docSnap = regByCode.docs[0];
-                const data = docSnap.data();
+            const regByCode = await firebase_1.db.collection('registrations').where('studentCode', '==', candidateCode).limit(5).get();
+            const validDoc = regByCode.docs.find((d) => d.data()?.status !== 'deleted');
+            if (validDoc) {
+                const data = validDoc.data();
                 return res.json({
                     success: true,
-                    student: { id: docSnap.id, code: data.studentCode || data.code || candidateCode, status: data.status || 'pending', role: 'student', ...data }
+                    student: { id: validDoc.id, code: data.studentCode || data.code || candidateCode, status: data.status || 'pending', role: 'student', ...data }
                 });
             }
         }
         if (cleanPhone) {
-            const regByPhone = await firebase_1.db.collection('registrations').where('phone', 'in', formats).limit(1).get();
-            if (!regByPhone.empty) {
-                const docSnap = regByPhone.docs[0];
-                const data = docSnap.data();
+            const regByPhone = await firebase_1.db.collection('registrations').where('phone', 'in', formats).limit(5).get();
+            const validDoc = regByPhone.docs.find((d) => d.data()?.status !== 'deleted');
+            if (validDoc) {
+                const data = validDoc.data();
                 return res.json({
                     success: true,
-                    student: { id: docSnap.id, code: data.studentCode || data.code || normCode, status: data.status || 'pending', role: 'student', ...data }
+                    student: { id: validDoc.id, code: data.studentCode || data.code || normCode, status: data.status || 'pending', role: 'student', ...data }
                 });
             }
         }
@@ -1251,8 +1251,9 @@ app.get('/api/parent/child/:studentId', async (req, res) => {
         if (!parentTg)
             return res.status(401).json({ error: 'Unauthorized: parentTelegramId required' });
         const studDoc = await firebase_1.db.collection('students').doc(studentId).get();
-        if (!studDoc.exists)
+        if (!studDoc.exists || studDoc.data()?.status === 'deleted') {
             return res.status(404).json({ error: 'Student not found' });
+        }
         const sData = studDoc.data();
         const allowedIds = Array.isArray(sData.parentTelegramIds) ? sData.parentTelegramIds.map(String) : [];
         if (String(sData.parentTelegramId || '') !== parentTg && !allowedIds.includes(parentTg)) {

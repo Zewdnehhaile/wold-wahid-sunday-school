@@ -104,14 +104,39 @@ class CollectionQuery {
     limit(n) {
         return new CollectionQuery(this.colName, [...this.constraints, { type: 'limit', n }]);
     }
+    matchesConstraints(item, whereConstraints) {
+        for (const c of whereConstraints) {
+            const { field, op, val } = c;
+            const itemVal = item[field] ?? item[field === 'telegramId' ? 'telegram_id' : field];
+            if (op === '==' || op === '=') {
+                if (!(String(itemVal) === String(val) || itemVal === val))
+                    return false;
+            }
+            else if (op === 'array-contains') {
+                if (!(Array.isArray(itemVal) && itemVal.map(String).includes(String(val))))
+                    return false;
+            }
+            else if (op === 'in') {
+                const arr = Array.isArray(val) ? val.map(String) : [];
+                if (!(arr.includes(String(itemVal)) || arr.includes(String(item.phone))))
+                    return false;
+            }
+            else if (op === '>=') {
+                if (!(String(itemVal) >= String(val)))
+                    return false;
+            }
+            else if (op === '<=') {
+                if (!(String(itemVal) <= String(val)))
+                    return false;
+            }
+        }
+        return true;
+    }
     async get() {
         let docsMap = new Map();
-        // 1. Load local cached documents first
         const colLocal = getCollectionLocal(this.colName);
-        Object.entries(colLocal).forEach(([docId, docData]) => {
-            docsMap.set(docId, normalizeDoc(docId, docData));
-        });
-        // 2. Query Firestore directly
+        let loadedFromFirestore = false;
+        // 1. Query Firestore directly as source of truth
         if (firestoreDb) {
             try {
                 const colRef = (0, firestore_1.collection)(firestoreDb, this.colName);
@@ -129,44 +154,54 @@ class CollectionQuery {
                     }
                 }
                 const snapshot = await (0, firestore_1.getDocs)(fsQuery);
+                loadedFromFirestore = true;
+                const returnedIds = new Set();
                 snapshot.docs.forEach((d) => {
                     const norm = normalizeDoc(d.id, d.data());
                     docsMap.set(d.id, norm);
-                    colLocal[d.id] = norm;
+                    returnedIds.add(d.id);
                 });
+                // Reconcile local cache so documents deleted in Firestore are purged locally
+                const whereConstraints = this.constraints.filter((c) => c.type === 'where');
+                const limitConstraint = this.constraints.find((c) => c.type === 'limit');
+                if (whereConstraints.length === 0 && !limitConstraint) {
+                    localStore[this.colName] = {};
+                    docsMap.forEach((val, key) => {
+                        localStore[this.colName][key] = val;
+                    });
+                }
+                else {
+                    if (!limitConstraint || snapshot.docs.length < limitConstraint.n) {
+                        for (const cachedId of Object.keys(colLocal)) {
+                            if (!returnedIds.has(cachedId) && this.matchesConstraints(colLocal[cachedId], whereConstraints)) {
+                                delete colLocal[cachedId];
+                            }
+                        }
+                    }
+                    docsMap.forEach((val, key) => {
+                        colLocal[key] = val;
+                    });
+                }
                 saveLocalStore(localStore);
             }
             catch (fsErr) {
                 console.warn(`Notice reading '${this.colName}' from Firestore:`, fsErr?.message || fsErr);
             }
         }
-        // 3. Filter results locally according to constraints
+        // 2. Fallback to local cache ONLY if Firestore was unavailable or failed
+        if (!loadedFromFirestore) {
+            Object.entries(colLocal).forEach(([docId, docData]) => {
+                docsMap.set(docId, normalizeDoc(docId, docData));
+            });
+        }
+        // 3. Apply constraints locally (useful for offline fallback or consistent sorting)
         let results = Array.from(docsMap.values());
+        const whereConstraints = this.constraints.filter((c) => c.type === 'where');
+        if (!loadedFromFirestore && whereConstraints.length > 0) {
+            results = results.filter((item) => this.matchesConstraints(item, whereConstraints));
+        }
         for (const c of this.constraints) {
-            if (c.type === 'where') {
-                const { field, op, val } = c;
-                results = results.filter((item) => {
-                    const itemVal = item[field] ?? item[field === 'telegramId' ? 'telegram_id' : field];
-                    if (op === '==' || op === '=') {
-                        return String(itemVal) === String(val) || itemVal === val;
-                    }
-                    if (op === 'array-contains') {
-                        return Array.isArray(itemVal) && itemVal.map(String).includes(String(val));
-                    }
-                    if (op === 'in') {
-                        const arr = Array.isArray(val) ? val.map(String) : [];
-                        return arr.includes(String(itemVal)) || arr.includes(String(item.phone));
-                    }
-                    if (op === '>=') {
-                        return String(itemVal) >= String(val);
-                    }
-                    if (op === '<=') {
-                        return String(itemVal) <= String(val);
-                    }
-                    return true;
-                });
-            }
-            else if (c.type === 'orderBy') {
+            if (c.type === 'orderBy') {
                 const { field, dir } = c;
                 results.sort((a, b) => {
                     const va = a[field] || '';
@@ -211,19 +246,28 @@ class CollectionQuery {
         return {
             async get() {
                 const colLocal = getCollectionLocal(colName);
-                let item = colLocal[id] ? normalizeDoc(id, colLocal[id]) : null;
-                if (firestoreDb && !item) {
+                let item = null;
+                let checkedFirestore = false;
+                if (firestoreDb) {
                     try {
                         const docSnap = await (0, firestore_1.getDoc)((0, firestore_1.doc)(firestoreDb, colName, id));
+                        checkedFirestore = true;
                         if (docSnap.exists()) {
                             item = normalizeDoc(id, docSnap.data());
                             colLocal[id] = item;
+                            saveLocalStore(localStore);
+                        }
+                        else if (colLocal[id]) {
+                            delete colLocal[id];
                             saveLocalStore(localStore);
                         }
                     }
                     catch (err) {
                         console.warn(`Firestore doc get notice for ${colName}/${id}:`, err?.message || err);
                     }
+                }
+                if (!checkedFirestore) {
+                    item = colLocal[id] ? normalizeDoc(id, colLocal[id]) : null;
                 }
                 return {
                     id,
