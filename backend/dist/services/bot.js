@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.botInstance = exports.getScheduleText = exports.scheduleBackKeyboard = exports.scheduleInlineKeyboard = exports.scheduleMenuText = exports.cancelKeyboard = exports.mainMenuKeyboard = exports.userSessions = void 0;
+exports.botInstance = exports.getScheduleText = exports.scheduleBackKeyboard = exports.scheduleInlineKeyboard = exports.scheduleMenuText = exports.verifyPhoneKeyboard = exports.cancelKeyboard = exports.mainMenuKeyboard = exports.userSessions = void 0;
 exports.dispatchSendMessage = dispatchSendMessage;
 exports.getSession = getSession;
 exports.setSession = setSession;
@@ -71,6 +71,16 @@ exports.cancelKeyboard = {
             [{ text: '❌ Cancel (ይቅር)' }]
         ],
         resize_keyboard: true,
+    }
+};
+exports.verifyPhoneKeyboard = {
+    reply_markup: {
+        keyboard: [
+            [{ text: '📱 የራሴን ስልክ አረጋግጥ (Verify My Phone)', request_contact: true }],
+            [{ text: '📝 የተማሪ ምዝገባ' }, { text: '🔙 ወደ ዋና ማውጫ ተመለስ' }],
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: true,
     }
 };
 exports.scheduleMenuText = `🗓️ *የወልድ ዋሕድ ሰንበት ት/ቤት መርሐ ግብር*\n\n` +
@@ -315,7 +325,10 @@ async function findUserRegistrationOrStudent(telegramId, username) {
                 .where('telegramUsername', '==', username)
                 .limit(20)
                 .get();
-            const validUserStuds = userSnap.docs.filter((d) => d.data()?.status !== 'deleted');
+            const validUserStuds = userSnap.docs.filter((d) => {
+                const sd = d.data();
+                return sd?.status !== 'deleted' && (!sd?.telegramId || String(sd.telegramId) === tgStr);
+            });
             validUserStuds.forEach((d) => allCandidates.push({ type: 'student', data: { id: d.id, ...d.data() } }));
         }
     }
@@ -337,7 +350,10 @@ async function findUserRegistrationOrStudent(telegramId, username) {
                 .where('telegramUsername', '==', username)
                 .limit(20)
                 .get();
-            const validUserRegs = userSnap.docs.filter((d) => d.data()?.status !== 'deleted');
+            const validUserRegs = userSnap.docs.filter((d) => {
+                const rd = d.data();
+                return rd?.status !== 'deleted' && (!rd?.telegramId || String(rd.telegramId) === tgStr);
+            });
             validUserRegs.forEach((d) => allCandidates.push({ type: 'registration', data: { id: d.id, ...d.data() } }));
         }
     }
@@ -595,6 +611,12 @@ async function handleTelegramUpdateInner(update) {
         await dispatchSendMessage(chatId, 'ኦፕሬሽኑ ተሰርዟል / Operation cancelled.', exports.mainMenuKeyboard);
         return;
     }
+    // Return to main menu command
+    if (text === '🔙 ወደ ዋና ማውጫ ተመለስ') {
+        await setSession(telegramId, null);
+        await dispatchSendMessage(chatId, '🏠 ዋና ማውጫ (Main Menu)፦', exports.mainMenuKeyboard);
+        return;
+    }
     // Check active session
     let session = await getSession(telegramId);
     // If user clicks a top-level menu button, handle top-level action & clear session if needed
@@ -606,7 +628,8 @@ async function handleTelegramUpdateInner(update) {
         '📅 የትምህርት መርሐ ግብር', '📅 Class Schedule', 'መርሐ ግብር', 'የክፍል መርሐ ግብር', '/schedule',
         '✉️ የፈቃድ መጠየቂያ', '✉️ Leave Request', 'የፈቃድ መጠየቂያ', 'ፈቃድ', '/leave',
         '✏️ መረጃ አስተካክል', '✏️ Edit Registration', 'መረጃ አስተካክል', '/edit',
-        '💬 ድጋፍና እርዳታ', '💬 Support & Help', 'ድጋፍና እርዳታ', 'ድጋፍ', '/support'
+        '💬 ድጋፍና እርዳታ', '💬 Support & Help', 'ድጋፍና እርዳታ', 'ድጋፍ', '/support',
+        '🔙 ወደ ዋና ማውጫ ተመለስ'
     ].includes(text);
     if (isMenuButton) {
         await setSession(telegramId, null);
@@ -1068,48 +1091,59 @@ async function handleTelegramUpdateInner(update) {
             return;
         }
     }
-    // ─── CHECK IF USER IS ENTERING A PHONE NUMBER TO LINK ACCOUNT ───
-    const cleanInputDigits = text.replace(/\D/g, '');
-    if (!session && (cleanInputDigits.length === 9 || cleanInputDigits.length === 10 || cleanInputDigits.length === 12)) {
-        const digits9 = cleanInputDigits.slice(-9);
-        if (digits9.startsWith('9') || digits9.startsWith('7')) {
-            const match = await findStudentOrRegistrationByPhone(text);
-            if (match) {
-                const student = match.data;
-                const table = match.type === 'student' ? 'students' : 'registrations';
-                try {
-                    await firebase_1.db.collection(table).doc(student.id).update({
-                        telegramId: String(telegramId),
-                        telegramUsername: username,
-                    });
-                }
-                catch (e) {
-                    console.warn('Notice updating student telegram id:', e);
-                }
-                const isApproved = student.status === 'approved' || student.status === 'active';
-                const statusAm = isApproved
-                    ? '✅ ጸድቋል (Approved)'
-                    : student.status === 'rejected'
-                        ? '❌ አልተቀበለም (Rejected)'
-                        : '⏳ በመጠባበቅ ላይ (Pending Review)';
-                let reply = `✅ *የቴሌግራም አካውንትዎ ከመገለጫዎ ጋር ተገናኝቷል!*\n` +
-                    `*Profile Linked Successfully!*\n\n` +
-                    `📋 *የተማሪ መረጃ:*\n` +
-                    `• *ስም (Name):* ${student.fullNameAm || student.fullNameEn || student.nameAm}\n` +
-                    `• *የክርስትና ስም:* ${student.christianName || 'N/A'}\n` +
-                    `• *ስልክ (Phone):* ${student.phone}\n` +
-                    `• *ክፍል (Dept):* ${student.department || 'N/A'}\n` +
-                    `• *ሁኔታ (Status):* ${statusAm}\n`;
-                if (isApproved) {
-                    reply += `• *የተማሪ መታወቂያ:* \`${student.studentCode || student.code}\`\n\nዲጂታል መታወቂያዎንና QR ኮድዎን ለማውረድ "👤 የኔ መታወቂያና QR" የሚለውን ይጫኑ።`;
-                }
-                else {
-                    reply += `\nማመልከቻዎ በአስተዳዳሪው እየታየ ነው፤ እንደጸደቀ የተማሪ መታወቂያዎ ይላክሎታል።`;
-                }
-                await dispatchSendMessage(chatId, reply, exports.mainMenuKeyboard);
-                return;
+    // ─── LINK ONLY VIA TELEGRAM-VERIFIED SELF CONTACT (NEVER VIA TYPED PHONE TEXT) ───
+    if (!session && msg.contact) {
+        const sharedUserId = msg.contact.user_id;
+        const sharedPhone = String(msg.contact.phone_number || '').trim();
+        if (!sharedUserId || String(sharedUserId) !== String(telegramId)) {
+            await dispatchSendMessage(chatId, '⚠️ *የሌላ ሰው ስልክ ቁጥር ማጋራት አይፈቀድም!*\nእባክዎ የራስዎን ቴሌግራም ስልክ ቁጥር ብቻ "📱 የራሴን ስልክ አረጋግጥ" የሚለውን ቁልፍ በመጫን ያረጋግጡ።', exports.mainMenuKeyboard);
+            return;
+        }
+        const match = await findStudentOrRegistrationByPhone(sharedPhone);
+        if (!match || match.data?.status === 'deleted') {
+            await dispatchSendMessage(chatId, 'በዚህ የተረጋገጠ ስልክ ቁጥር የተመዘገበ ተማሪ አልተገኘም። አዲስ ለመመዝገብ *"📝 የተማሪ ምዝገባ"* የሚለውን ይጫኑ።', exports.mainMenuKeyboard);
+            return;
+        }
+        const student = match.data;
+        const existingTg = String(student.telegramId || student.telegram_id || '').trim();
+        if (existingTg && existingTg !== String(telegramId)) {
+            await dispatchSendMessage(chatId, '⚠️ *ይህ ስልክ ቁጥር አስቀድሞ ከሌላ የቴሌግራም መለያ ጋር የተገናኘ ነው!*\nመለያዎን ለመቀየር ወይም እርዳታ ለማግኘት እባክዎ የሰንበት ት/ቤት አስተዳዳሪን ያነጋግሩ።', exports.mainMenuKeyboard);
+            return;
+        }
+        const table = match.type === 'student' ? 'students' : 'registrations';
+        if (!existingTg) {
+            try {
+                await firebase_1.db.collection(table).doc(student.id).update({
+                    telegramId: String(telegramId),
+                    telegramUsername: username,
+                });
+            }
+            catch (e) {
+                console.warn('Notice updating student telegram id:', e);
             }
         }
+        const isApproved = student.status === 'approved' || student.status === 'active';
+        const statusAm = isApproved
+            ? '✅ ጸድቋል (Approved)'
+            : student.status === 'rejected'
+                ? '❌ አልተቀበለም (Rejected)'
+                : '⏳ በመጠባበቅ ላይ (Pending Review)';
+        let reply = `✅ *የቴሌግራም አካውንትዎ በደህንነት ተረጋግጦ ተገናኝቷል!*\n` +
+            `*Verified Profile Linked Successfully!*\n\n` +
+            `📋 *የተማሪ መረጃ:*\n` +
+            `• *ስም (Name):* ${student.fullNameAm || student.fullNameEn || student.nameAm}\n` +
+            `• *የክርስትና ስም:* ${student.christianName || 'N/A'}\n` +
+            `• *ስልክ (Phone):* ${student.phone}\n` +
+            `• *ክፍል (Dept):* ${student.department || 'N/A'}\n` +
+            `• *ሁኔታ (Status):* ${statusAm}\n`;
+        if (isApproved) {
+            reply += `• *የተማሪ መታወቂያ:* \`${student.studentCode || student.code}\`\n\nዲጂታል መታወቂያዎንና QR ኮድዎን ለማውረድ "👤 የኔ መታወቂያና QR" የሚለውን ይጫኑ።`;
+        }
+        else {
+            reply += `\nማመልከቻዎ በአስተዳዳሪው እየታየ ነው፤ እንደጸደቀ የተማሪ መታወቂያዎ ይላክሎታል።`;
+        }
+        await dispatchSendMessage(chatId, reply, exports.mainMenuKeyboard);
+        return;
     }
     // ─── TOP LEVEL MENU ACTIONS (No session active) ───
     // 1. 📝 REGISTER AS STUDENT WIZARD
@@ -1156,8 +1190,8 @@ async function handleTelegramUpdateInner(update) {
                 await dispatchSendMessage(chatId, '📋 *የምዝገባ ሁኔታ / Registration Status*\n' +
                     '⛪ መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን\n═══════════════════════\n' +
                     'በዚህ የቴሌግራም አካውንት የተገኘ የተማሪ ምዝገባ የለም።\n\n' +
-                    '👉 አዲስ ለመመዝገብ ከታች *"📝 የተማሪ ምዝገባ"* የሚለውን ይጫኑ።\n' +
-                    '👉 አስቀድመው በስልክ ቁጥር ተመዝግበው ከሆነ የስልክ ቁጥርዎን (ምሳሌ፡ `0911234567`) እዚህ ይላኩ፤ መለያዎ ወዲያውኑ ይገናኛል።', exports.mainMenuKeyboard);
+                    '👉 አዲስ ለመመዝገብ *"📝 የተማሪ ምዝገባ"* የሚለውን ይጫኑ።\n' +
+                    '👉 አስቀድመው በአስተዳዳሪ በስልክ ቁጥር ተመዝግበው ከሆነ የራስዎን ቴሌግራም ቁጥር ለማረጋገጥ ከታች *"📱 የራሴን ስልክ አረጋግጥ"* የሚለውን ይጫኑ።', exports.verifyPhoneKeyboard);
                 return;
             }
             const reg = match.data;
@@ -1194,8 +1228,8 @@ async function handleTelegramUpdateInner(update) {
             await dispatchSendMessage(chatId, '📋 *የምዝገባ ሁኔታ / Registration Status*\n' +
                 '⛪ መካነ ቅዱሳን ኢያቄም ወሐና ቤተ-ክርስቲያን\n═══════════════════════\n' +
                 'በዚህ የቴሌግራም አካውንት የተገኘ የተማሪ ምዝገባ የለም።\n\n' +
-                '👉 አዲስ ለመመዝገብ ከታች *"📝 የተማሪ ምዝገባ"* የሚለውን ይጫኑ።\n' +
-                '👉 አስቀድመው በስልክ ቁጥር ተመዝግበው ከሆነ የስልክ ቁጥርዎን (ምሳሌ፡ `0911234567`) እዚህ ይላኩ፤ መለያዎ ወዲያውኑ ይገናኛል።', exports.mainMenuKeyboard);
+                '👉 አዲስ ለመመዝገብ *"📝 የተማሪ ምዝገባ"* የሚለውን ይጫኑ።\n' +
+                '👉 አስቀድመው በአስተዳዳሪ በስልክ ቁጥር ተመዝግበው ከሆነ የራስዎን ቴሌግራም ቁጥር ለማረጋገጥ ከታች *"📱 የራሴን ስልክ አረጋግጥ"* የሚለውን ይጫኑ።', exports.verifyPhoneKeyboard);
         }
         return;
     }
@@ -1204,7 +1238,7 @@ async function handleTelegramUpdateInner(update) {
         try {
             const match = await findUserRegistrationOrStudent(telegramId, username);
             if (!match || match.data?.status === 'deleted') {
-                await dispatchSendMessage(chatId, 'የተመዘገበ ተማሪ አልተገኘም። እባክዎ በመጀመሪያ "📝 የተማሪ ምዝገባ" የሚለውን በመጫን ይመዝገቡ ወይንም የስልክ ቁጥርዎን (ምሳሌ፡ `0911234567`) ይላኩ።\nNo registered student profile found. Please register first or send your phone number.', exports.mainMenuKeyboard);
+                await dispatchSendMessage(chatId, 'የተመዘገበ ተማሪ አልተገኘም። እባክዎ በመጀመሪያ *"📝 የተማሪ ምዝገባ"* የሚለውን በመጫን ይመዝገቡ ወይም የራስዎን ቴሌግራም ስልክ ለማረጋገጥ *"📱 የራሴን ስልክ አረጋግጥ"* የሚለውን ይጫኑ።\nNo registered student profile found. Please register first or verify your own Telegram phone.', exports.verifyPhoneKeyboard);
                 return;
             }
             const student = match.data;
@@ -1221,7 +1255,7 @@ async function handleTelegramUpdateInner(update) {
                     await dispatchSendMessage(chatId, '⏳ ምዝገባዎ በአስተዳዳሪው ገና አልጸደቀም። እንደጸደቀ የተማሪ መታወቂያ እና የግል QR ኮድ ይላክሎታል።\nYour registration is still pending review.', exports.mainMenuKeyboard);
                 }
                 else {
-                    await dispatchSendMessage(chatId, 'የተመዘገበ ተማሪ አልተገኘም። እባክዎ በመጀመሪያ "📝 የተማሪ ምዝገባ" የሚለውን በመጫን ይመዝገቡ ወይንም የስልክ ቁጥርዎን (ምሳሌ፡ `0911234567`) ይላኩ።\nNo registered student profile found. Please register first or send your phone number.', exports.mainMenuKeyboard);
+                    await dispatchSendMessage(chatId, 'የተመዘገበ ተማሪ አልተገኘም። እባክዎ በመጀመሪያ *"📝 የተማሪ ምዝገባ"* የሚለውን በመጫን ይመዝገቡ ወይም የራስዎን ቴሌግራም ስልክ ለማረጋገጥ *"📱 የራሴን ስልክ አረጋግጥ"* የሚለውን ይጫኑ።\nNo registered student profile found. Please register first or verify your own Telegram phone.', exports.verifyPhoneKeyboard);
                 }
                 return;
             }
@@ -1527,7 +1561,7 @@ async function handleTelegramUpdateInner(update) {
 async function sendEditFieldMenu(chatId, telegramId, username) {
     const match = await findUserRegistrationOrStudent(telegramId, username);
     if (!match || match.data?.status === 'deleted') {
-        await dispatchSendMessage(chatId, '⚠️ የሚስተካከል የተማሪ ምዝገባ አልተገኘም። እባክዎ መጀመሪያ *"📝 የተማሪ ምዝገባ"* የሚለውን በመጫን ይመዝገቡ ወይም ስልክ ቁጥርዎን ይላኩ።', exports.mainMenuKeyboard);
+        await dispatchSendMessage(chatId, '⚠️ የሚስተካከል የተማሪ ምዝገባ አልተገኘም። እባክዎ መጀመሪያ *"📝 የተማሪ ምዝገባ"* የሚለውን በመጫን ይመዝገቡ ወይም *"📱 የራሴን ስልክ አረጋግጥ"* በመጫን የራስዎን አካውንት ያረጋግጡ።', exports.verifyPhoneKeyboard);
         return;
     }
     const reg = match.data;
