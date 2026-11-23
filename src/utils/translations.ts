@@ -66,6 +66,7 @@ export const t = {
       arts: 'ኪነ ጥበብ ክፍል',
       abnet: 'አብነት ክፍል',
       choir: 'መዝሙር ክፍል',
+      family: 'ቤተሰብ ክፍል',
       general: 'አጠቃላይ',
     },
     grades: {
@@ -211,6 +212,7 @@ export const t = {
       arts: 'Arts & Drama Department',
       abnet: 'Abnet (Liturgy) Department',
       choir: 'Choir & Wereb Department',
+      family: 'Family Department',
       general: 'General',
     },
     grades: {

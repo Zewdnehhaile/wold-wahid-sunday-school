@@ -829,7 +829,7 @@ async function startServer() {
         db.collection('registrations').limit(200).get(),
       ]);
 
-      const prefixMax: Record<string, number> = { EDU: 0, MEZ: 0, ABN: 0, ART: 0, DIS: 0, GEN: 0 };
+      const prefixMax: Record<string, number> = { EDU: 0, MEZ: 0, ABN: 0, ART: 0, DIS: 0, FAM: 0, GEN: 0 };
 
       // Pass 1: find any already-migrated short codes so sequences continue cleanly
       for (const d of studSnap.docs) {

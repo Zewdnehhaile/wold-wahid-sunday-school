@@ -386,6 +386,9 @@ export const MobileAppSimulator: React.FC<MobileAppSimulatorProps> = ({
                         <option>መዘምራን (Choir)</option>
                         <option>ኪነ-ጥበብ (Arts)</option>
                         <option>አብነት (Abnet)</option>
+                        <option>ስነ-ስርዓት (Discipline)</option>
+                        <option>ቤተሰብ (Family)</option>
+                        <option>አጠቃላይ (General)</option>
                       </select>
                     </div>
 

@@ -439,6 +439,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
       case 'arts': return 'ኪነ ጥበብ ክፍል';
       case 'abnet': return 'አብነት ክፍል';
       case 'discipline': return 'ስነ ስርዓት ክፍል';
+      case 'family': return 'ቤተሰብ ክፍል';
       default: return 'አጠቃላይ';
     }
   };
@@ -931,6 +932,7 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                     <option value="abnet">አብነት ክፍል</option>
                     <option value="arts">ኪነ ጥበብ ክፍል</option>
                     <option value="discipline">ስነ ስርዓት ክፍል</option>
+                    <option value="family">ቤተሰብ ክፍል</option>
                     <option value="general">አጠቃላይ አስተዳደር</option>
                   </select>
                 </div>
@@ -1147,12 +1149,13 @@ export const AdminManagement: React.FC<AdminManagementProps> = ({
                     ሚና (Role) *
                   </label>
                   <select
+                    disabled={!isMasterSuper}
                     value={editingAdmin.role}
                     onChange={(e) => setEditingAdmin({ ...editingAdmin, role: e.target.value as UserRole })}
-                    className="w-full px-3 py-2 bg-[#062414] border border-[#0f4425] rounded-xl text-white focus:outline-none focus:border-amber-400"
+                    className="w-full px-3 py-2 bg-[#062414] border border-[#0f4425] rounded-xl text-white focus:outline-none focus:border-amber-400 disabled:opacity-70"
                   >
                     <option value="admin">አስተዳዳሪ (Admin)</option>
-                    <option value="super_admin">ዋና አስተዳዳሪ (Super Admin)</option>
+                    {isMasterSuper && <option value="super_admin">ዋና አስተዳዳሪ (Super Admin)</option>}
                   </select>
                 </div>
                 <div>

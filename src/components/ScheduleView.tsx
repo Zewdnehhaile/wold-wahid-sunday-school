@@ -34,6 +34,7 @@ import {
   RotateCcw,
   Sparkles,
   UserCheck,
+  Users,
 } from 'lucide-react';
 
 interface ScheduleViewProps {
@@ -169,6 +170,8 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
         return <Palette className="w-3.5 h-3.5 text-amber-400" />;
       case 'abnet':
         return <Scroll className="w-3.5 h-3.5 text-emerald-400" />;
+      case 'family':
+        return <Users className="w-3.5 h-3.5 text-teal-400" />;
       case 'discipline':
       default:
         return <Shield className="w-3.5 h-3.5 text-amber-300" />;
@@ -198,6 +201,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
       case 'arts': return 'ኪነ ጥበብ ክፍል';
       case 'abnet': return 'አብነት ክፍል';
       case 'discipline': return 'ስነ ስርዓት ክፍል';
+      case 'family': return 'ቤተሰብ ክፍል';
       default: return 'አጠቃላይ';
     }
   };
@@ -797,6 +801,7 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
                     <option value="abnet">አብነት ክፍል</option>
                     <option value="arts">ኪነ ጥበብ ክፍል</option>
                     <option value="discipline">ስነ ስርዓት ክፍል</option>
+                    <option value="family">ቤተሰብ ክፍል</option>
                     <option value="general">አጠቃላይ</option>
                   </select>
                 </div>

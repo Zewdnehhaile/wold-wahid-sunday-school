@@ -29,6 +29,7 @@ const DEPT_OPTIONS = [
   { id: 'abnet', label: '📜 አብነት ክፍል' },
   { id: 'arts', label: '🎨 ኪነ ጥበብ ክፍል' },
   { id: 'discipline', label: '🛡️ ስነ ስርዓት ክፍል' },
+  { id: 'family', label: '👨‍👩‍👧 ቤተሰብ ክፍል' },
   { id: 'general', label: '🤝 አጠቃላይ' },
 ];
 

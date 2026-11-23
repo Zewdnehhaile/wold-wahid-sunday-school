@@ -694,7 +694,8 @@ async function handleTelegramUpdateInner(update) {
                         keyboard: [
                             [{ text: 'ትምህርት ክፍል (Education)' }, { text: 'መዝሙር ክፍል (Choir)' }],
                             [{ text: 'ኪነ-ጥበብ ክፍል (Arts)' }, { text: 'አብነት ክፍል (Abnet)' }],
-                            [{ text: 'ስነ-ስርዓት ክፍል (Discipline)' }, { text: 'አጠቃላይ አባል (General)' }],
+                            [{ text: 'ስነ-ስርዓት ክፍል (Discipline)' }, { text: 'ቤተሰብ ክፍል (Family)' }],
+                            [{ text: 'አጠቃላይ አባል (General)' }],
                             [{ text: '❌ Cancel (ይቅር)' }]
                         ],
                         resize_keyboard: true,
@@ -1593,7 +1594,8 @@ async function startFieldEditPrompt(chatId, telegramId, username, field) {
                 keyboard: [
                     [{ text: 'ትምህርት ክፍል (Education)' }, { text: 'መዝሙር ክፍል (Choir)' }],
                     [{ text: 'ኪነ-ጥበብ ክፍል (Arts)' }, { text: 'አብነት ክፍል (Abnet)' }],
-                    [{ text: 'ስነ-ስርዓት ክፍል (Discipline)' }, { text: 'አጠቃላይ አባል (General)' }],
+                    [{ text: 'ስነ-ስርዓት ክፍል (Discipline)' }, { text: 'ቤተሰብ ክፍል (Family)' }],
+                    [{ text: 'አጠቃላይ አባል (General)' }],
                     [{ text: '❌ Cancel (ይቅር)' }],
                 ],
                 resize_keyboard: true,

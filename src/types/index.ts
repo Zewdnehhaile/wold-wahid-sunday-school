@@ -4,7 +4,7 @@ export type DayOfWeek = 'friday' | 'saturday' | 'sunday';
 
 export type GradeLevel = 'pre_kg' | 'grade_1_2' | 'grade_3_5' | 'grade_6_9' | 'leaders';
 
-export type SundaySchoolDepartment = 'discipline' | 'education' | 'arts' | 'abnet' | 'choir' | 'general';
+export type SundaySchoolDepartment = 'discipline' | 'education' | 'arts' | 'abnet' | 'choir' | 'family' | 'general';
 
 export type Department = SundaySchoolDepartment;
 
@@ -72,7 +72,7 @@ export interface PendingEditSummary {
 
 export interface Member {
   id: string;
-  code: string; // e.g. "EDU001", "MEZ001", "ABN001", "ART001", "DIS001", "GEN001"
+  code: string; // e.g. "EDU001", "MEZ001", "ABN001", "ART001", "DIS001", "FAM001", "GEN001"
   legacyCode?: string; // Previous WW-2026-... code preserved for old QR cards
   fullNameAm: string;
   fullNameEn: string;

@@ -6,6 +6,7 @@ import { t } from '../utils/translations';
 import { Printer, X, ShieldCheck, Phone, Download, Loader2 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { getPhotoUrl } from '../utils/photoUtils';
+import { resolveDepartmentKey } from '../utils/idCodes';
 
 interface IdCardStudioProps {
   members: Member[];
@@ -310,7 +311,7 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
                     <div className="mt-2 space-y-1 text-[11px] text-slate-300">
                       <div className="flex items-center gap-1.5">
                         <span className="text-amber-400 font-medium">ክፍል:</span>
-                        <span className="text-slate-200">{dict.departments[currentMember.department] || currentMember.department}</span>
+                        <span className="text-slate-200">{dict.departments[resolveDepartmentKey(currentMember.department)] || currentMember.department}</span>
                       </div>
                       <div className="flex items-center gap-1.5">
                         <span className="text-amber-400 font-medium">ስልክ:</span>
@@ -466,7 +467,7 @@ export const IdCardStudio: React.FC<IdCardStudioProps> = ({
                     <div className="min-w-0 flex-1">
                       <h6 className="text-xs font-bold text-white leading-tight break-words font-sans">{m.fullNameAm}</h6>
                       <p className="text-[11px] text-slate-300 leading-tight break-words font-sans mt-0.5">{m.fullNameEn}</p>
-                      <p className="text-[10px] text-amber-400 mt-1.5 font-medium">{dict.departments[m.department] || m.department}</p>
+                      <p className="text-[10px] text-amber-400 mt-1.5 font-medium">{dict.departments[resolveDepartmentKey(m.department)] || m.department}</p>
                       <p className="text-[10px] font-mono text-slate-300 mt-0.5">{m.phone}</p>
                     </div>
                     <div className="p-1.5 bg-white rounded-xl shrink-0 shadow-sm flex flex-col items-center">

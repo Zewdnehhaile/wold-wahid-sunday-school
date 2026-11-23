@@ -9,6 +9,7 @@ import {
   normalizeStudentCode,
   isDepartmentShortCode,
   studentCodesMatch,
+  resolveDepartmentKey,
 } from '../utils/idCodes';
 import {
   Search,
@@ -135,6 +136,7 @@ export const MemberList: React.FC<MemberListProps> = ({
       (selectedDept === 'arts' && (m.department?.toLowerCase().includes('art') || m.department?.includes('ኪነ'))) ||
       (selectedDept === 'abnet' && (m.department?.toLowerCase().includes('abnet') || m.department?.includes('አብነት'))) ||
       (selectedDept === 'discipline' && (m.department?.toLowerCase().includes('discipline') || m.department?.includes('ስነ'))) ||
+      (selectedDept === 'family' && (m.department?.toLowerCase().includes('family') || m.department?.includes('ቤተሰብ'))) ||
       (selectedDept === 'general' && (m.department?.toLowerCase().includes('general') || m.department?.includes('አጠቃላይ')));
     return matchesSearch && matchesDept;
   });
@@ -368,6 +370,7 @@ export const MemberList: React.FC<MemberListProps> = ({
             { id: 'arts', label: dict.departments.arts },
             { id: 'abnet', label: dict.departments.abnet },
             { id: 'choir', label: dict.departments.choir },
+            { id: 'family', label: dict.departments.family },
             { id: 'general', label: dict.departments.general },
           ].map((dept) => (
             <button
@@ -449,7 +452,7 @@ export const MemberList: React.FC<MemberListProps> = ({
 
                     <td className="py-3 px-4 text-slate-300 cursor-pointer" onClick={() => setSelectedMember(member)}>
                       <div>
-                        <span>{dict.departments[member.department]}</span>
+                        <span>{dict.departments[resolveDepartmentKey(member.department)] || member.department}</span>
                         <p className="text-[10px] text-slate-500">{member.roleAm}</p>
                       </div>
                     </td>
@@ -1011,6 +1014,7 @@ export const MemberList: React.FC<MemberListProps> = ({
                     <option value="arts">{dict.departments.arts}</option>
                     <option value="abnet">{dict.departments.abnet}</option>
                     <option value="choir">{dict.departments.choir}</option>
+                    <option value="family">{dict.departments.family}</option>
                     <option value="general">{dict.departments.general}</option>
                   </select>
                 </div>
@@ -1228,6 +1232,7 @@ export const MemberList: React.FC<MemberListProps> = ({
                     <option value="arts">ኪነ ጥበብ (Arts)</option>
                     <option value="abnet">አብነት (Abnet)</option>
                     <option value="choir">መዝሙር (Choir)</option>
+                    <option value="family">ቤተሰብ (Family)</option>
                     <option value="general">አጠቃላይ (General)</option>
                   </select>
                 </div>

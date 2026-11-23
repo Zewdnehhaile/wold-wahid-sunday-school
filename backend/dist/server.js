@@ -788,7 +788,7 @@ app.post('/api/admin/migrate-department-ids', async (req, res) => {
             firebase_1.db.collection('students').limit(300).get(),
             firebase_1.db.collection('registrations').limit(200).get(),
         ]);
-        const prefixMax = { EDU: 0, MEZ: 0, ABN: 0, ART: 0, DIS: 0, GEN: 0 };
+        const prefixMax = { EDU: 0, MEZ: 0, ABN: 0, ART: 0, DIS: 0, FAM: 0, GEN: 0 };
         for (const d of studSnap.docs) {
             const data = d.data();
             if (data?.status === 'deleted')

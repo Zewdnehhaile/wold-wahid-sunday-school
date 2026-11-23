@@ -6,6 +6,7 @@ export const DEPT_ID_PREFIXES: Record<SundaySchoolDepartment, string> = {
   abnet: 'ABN',
   arts: 'ART',
   discipline: 'DIS',
+  family: 'FAM',
   general: 'GEN',
 };
 
@@ -17,6 +18,7 @@ export function resolveDepartmentKey(rawDept?: string): SundaySchoolDepartment {
   if (val === 'abnet' || val.includes('abnet') || val.includes('አብነት')) return 'abnet';
   if (val === 'arts' || val.includes('art') || val.includes('ኪነ')) return 'arts';
   if (val === 'discipline' || val.includes('discipline') || val.includes('ስነ')) return 'discipline';
+  if (val === 'family' || val.includes('family') || val.includes('ቤተሰብ')) return 'family';
   if (val === 'general' || val.includes('general') || val.includes('አጠቃላይ')) return 'general';
   return 'general';
 }
@@ -30,7 +32,7 @@ export function normalizeStudentCode(code?: string): string {
 
 export function isDepartmentShortCode(code?: string): boolean {
   const norm = normalizeStudentCode(code);
-  return /^(EDU|MEZ|ABN|ART|DIS|GEN)\d{3,}$/.test(norm);
+  return /^(EDU|MEZ|ABN|ART|DIS|FAM|GEN)\d{3,}$/.test(norm);
 }
 
 export function studentCodesMatch(a?: string, b?: string): boolean {

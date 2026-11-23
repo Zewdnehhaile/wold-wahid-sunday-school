@@ -12,6 +12,7 @@ exports.DEPT_ID_PREFIXES = {
     abnet: 'ABN',
     arts: 'ART',
     discipline: 'DIS',
+    family: 'FAM',
     general: 'GEN',
 };
 function resolveDepartmentKey(rawDept) {
@@ -28,6 +29,8 @@ function resolveDepartmentKey(rawDept) {
         return 'arts';
     if (val === 'discipline' || val.includes('discipline') || val.includes('ስነ'))
         return 'discipline';
+    if (val === 'family' || val.includes('family') || val.includes('ቤተሰብ'))
+        return 'family';
     if (val === 'general' || val.includes('general') || val.includes('አጠቃላይ'))
         return 'general';
     return 'general';
@@ -39,6 +42,7 @@ function getDepartmentLabelAm(rawDept) {
         case 'abnet': return 'አብነት ክፍል';
         case 'arts': return 'ኪነ ጥበብ ክፍል';
         case 'discipline': return 'ስነ ስርዓት ክፍል';
+        case 'family': return 'ቤተሰብ ክፍል';
         default: return 'አጠቃላይ ክፍል';
     }
 }
@@ -50,7 +54,7 @@ function normalizeStudentCode(code) {
 }
 function isDepartmentShortCode(code) {
     const norm = normalizeStudentCode(code);
-    return /^(EDU|MEZ|ABN|ART|DIS|GEN)\d{3,}$/.test(norm);
+    return /^(EDU|MEZ|ABN|ART|DIS|FAM|GEN)\d{3,}$/.test(norm);
 }
 function getDepartmentPrefix(rawDept) {
     return exports.DEPT_ID_PREFIXES[resolveDepartmentKey(rawDept)] || 'GEN';

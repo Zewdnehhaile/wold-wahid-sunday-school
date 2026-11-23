@@ -12,7 +12,7 @@ import firebaseConfig from '../firebase-applet-config.json';
 import { recordAuditLog } from './utils/auditLog';
 import { t } from './utils/translations';
 import { getPhotoUrl } from './utils/photoUtils';
-import { normalizeStudentCode } from './utils/idCodes';
+import { normalizeStudentCode, resolveDepartmentKey } from './utils/idCodes';
 import { MemberList } from './components/MemberList';
 import { ParentPortalView } from './components/ParentPortalView';
 import { ParentApproveView } from './components/ParentApproveView';
@@ -99,7 +99,7 @@ export default function App() {
   });
 
   // Ensure localStorage caches match current active Firestore database & version (clears stale shifted-DB counts like 14 vs 2)
-  const CACHE_SIGNATURE = `${firebaseConfig.firestoreDatabaseId || 'default'}_v4`;
+  const CACHE_SIGNATURE = `${firebaseConfig.firestoreDatabaseId || 'default'}_v5`;
   const readValidatedCache = <T,>(key: string): T[] => {
     try {
       const currentSig = localStorage.getItem('ww_cache_signature');
@@ -189,7 +189,7 @@ export default function App() {
             fullNameEn: d.fullNameEn || d.fullNameAm || d.nameEn || 'Unnamed Student',
             phone: d.phone || '',
             gender: d.gender === 'female' ? 'female' : 'male',
-            department: d.department || 'education',
+            department: d.department ? resolveDepartmentKey(d.department) : 'education',
             gradeLevel: d.gradeLevel || 'general',
             roleAm: 'ተማሪ / Student',
             roleEn: 'Student',
@@ -241,7 +241,7 @@ export default function App() {
             birthYear: d.birthYear || d.birthDate || '',
             phone: d.phone || '',
             gender: d.gender === 'female' ? 'female' : 'male',
-            department: d.department || 'education',
+            department: d.department ? resolveDepartmentKey(d.department) : 'education',
             gradeLevel: d.gradeLevel || 'general',
             roleAm: 'ተማሪ / Student',
             roleEn: 'Student',

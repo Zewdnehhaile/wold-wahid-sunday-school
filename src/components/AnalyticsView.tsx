@@ -90,6 +90,12 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       color: 'bg-pink-500',
     },
     {
+      key: 'family',
+      label: dict.departments.family,
+      count: members.filter((m) => m.department === 'family').length,
+      color: 'bg-teal-500',
+    },
+    {
       key: 'general',
       label: dict.departments.general,
       count: members.filter((m) => m.department === 'general').length,
